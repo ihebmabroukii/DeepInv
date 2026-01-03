@@ -1,0 +1,12 @@
+{
+    "name": "security-intelligence-root",
+    "version": "1.0.0",
+    "scripts": {
+        "dev:frontend": "cd security-intelligence-platform && npm run dev",
+        "dev:backend": "cd security-intelligence-platform-backend && python run.py",
+        "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}

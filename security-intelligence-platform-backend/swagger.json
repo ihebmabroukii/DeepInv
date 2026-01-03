@@ -1,0 +1,318 @@
+{
+  "info": {
+    "version": "1.0",
+    "title": "Security Intelligence Platform API",
+    "description": "API for the AI-Driven Security Intelligence Platform",
+    "termsOfService": "/tos"
+  },
+  "paths": {
+    "/api/v1/dashboard/overview": {
+      "get": {
+        "summary": "Get Overview Dashboard Data",
+        "description": "Includes Global Risk Score and high-level status.<br/>",
+        "responses": {
+          "200": {
+            "description": "Dashboard overview data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "risk_score": {
+                  "type": "integer",
+                  "description": "Global Risk Score (0-100)",
+                  "example": 78
+                },
+                "risk_level": {
+                  "type": "string",
+                  "description": "specific risk level",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "critical"
+                  ],
+                  "example": "medium"
+                },
+                "environment": {
+                  "type": "string",
+                  "example": "Production"
+                },
+                "active_threats": {
+                  "type": "integer",
+                  "example": 3
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dashboard"
+        ],
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "operationId": "getDashboardOverview"
+      }
+    },
+    "/api/v1/dashboard/insights": {
+      "get": {
+        "summary": "Get Top AI Insights",
+        "description": "Natural language insights about security posture.<br/>",
+        "responses": {
+          "200": {
+            "description": "List of AI insights",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "insights": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string",
+                        "enum": [
+                          "critical",
+                          "high",
+                          "medium",
+                          "low"
+                        ]
+                      },
+                      "message": {
+                        "type": "string",
+                        "example": "Your biggest risk today is outdated TLS on 2 production servers."
+                      },
+                      "timestamp": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dashboard"
+        ],
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "operationId": "getAiInsights"
+      }
+    },
+    "/api/v1/assets/graph": {
+      "get": {
+        "summary": "Get Asset & Trust Graph Data",
+        "description": "Returns nodes and edges for visualizing infrastructure trust relationships.<br/>",
+        "responses": {
+          "200": {
+            "description": "Graph data object",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "nodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "server",
+                          "database",
+                          "load_balancer",
+                          "firewall"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "healthy",
+                          "warning",
+                          "compromised"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "target": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "trust",
+                          "connect"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "secure",
+                          "insecure"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "operationId": "getAssetGraph"
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "summary": "Get Security Events",
+        "description": "List of security events with AI reasoning.<br/>",
+        "responses": {
+          "200": {
+            "description": "List of security events",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "events": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "ai_reasoning": {
+                        "type": "string"
+                      },
+                      "confidence_score": {
+                        "type": "integer"
+                      },
+                      "timestamp": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "operationId": "getSecurityEvents"
+      }
+    },
+    "/api/v1/events/{event_id}/remediate": {
+      "post": {
+        "summary": "Get AI Remediation Plan",
+        "description": "Returns specific shell commands or config fixes.<br/>",
+        "responses": {
+          "200": {
+            "description": "Remediation plan",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "explanation": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "operationId": "remediateEvent"
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check Endpoint",
+        "responses": {
+          "200": {
+            "description": "API is healthy",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "example": "healthy"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "System"
+        ]
+      }
+    }
+  },
+  "definitions": {},
+  "swagger": "2.0"
+}

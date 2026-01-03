@@ -1,0 +1,7 @@
+flask
+flask-cors
+flasgger
+python-dotenv
+supabase
+gunicorn
+pytest
