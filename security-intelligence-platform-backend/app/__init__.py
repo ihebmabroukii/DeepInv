@@ -2,8 +2,13 @@ from flask import Flask
 from flasgger import Swagger
 from flask_cors import CORS
 from config import Config
+import os
+
+# Define the db client variable globally for import by other modules
+supabase = None
 
 def create_app(config_class=Config):
+    global supabase
     app = Flask(__name__)
     app.config.from_object(config_class)
 
@@ -11,9 +16,26 @@ def create_app(config_class=Config):
     CORS(app)
     Swagger(app)
 
+    # Initialize Database Client
+    if app.config.get('USE_LOCAL_DB', True):
+        from app.local_db import LocalClient
+        print("Using Local Database (SQLite)")
+        supabase = LocalClient()
+    else:
+        from supabase import create_client
+        print("Using Remote Supabase")
+        url = app.config['SUPABASE_URL']
+        key = app.config['SUPABASE_KEY']
+        if not url or not key:
+            print("WARNING: Supabase URL/Key missing but USE_LOCAL_DB is False.")
+        supabase = create_client(url, key)
+
     # Register Blueprints
     from app.api import bp as api_bp
     app.register_blueprint(api_bp, url_prefix='/api/v1')
+    
+    from app.api.agents import agents_bp
+    app.register_blueprint(agents_bp, url_prefix='/api/v1/agents')
 
     @app.route('/health')
     def health_check():
