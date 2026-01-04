@@ -19,7 +19,7 @@ def create_app(config_class=Config):
     # Initialize Database Client
     if app.config.get('USE_LOCAL_DB', True):
         from app.local_db import LocalClient
-        print("Using Local Database (SQLite)")
+        print("Using Local Database (PostgreSQL)")
         supabase = LocalClient()
     else:
         from supabase import create_client
@@ -36,6 +36,15 @@ def create_app(config_class=Config):
     
     from app.api.agents import agents_bp
     app.register_blueprint(agents_bp, url_prefix='/api/v1/agents')
+
+    @app.route('/')
+    def index():
+        return {
+            "message": "Security Intelligence Platform API",
+            "docs": "/apidocs",
+            "health": "/health",
+            "status": "online"
+        }, 200
 
     @app.route('/health')
     def health_check():

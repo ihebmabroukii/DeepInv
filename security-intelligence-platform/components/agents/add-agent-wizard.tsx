@@ -97,6 +97,7 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
         environment: "prod",
         criticality: "medium",
         platform: "" as AgentPlatform | "",
+        target_os: "linux" as "linux" | "windows",
         capabilities: [] as string[],
         region: "",
         network_zone: "internal",
@@ -146,17 +147,18 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
             }
 
             // Call backend API
-            const response = await fetch("http://127.0.0.1:5000/api/v1/agents", {
+            // Use trailing slash to avoid redirect issues with CORS
+            const response = await fetch("http://127.0.0.1:5000/api/v1/agents/", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    // Add auth header if needed, for super admin we might need to handle this
                 },
                 body: JSON.stringify(payload)
             })
 
             if (!response.ok) {
-                throw new Error("Failed to create agent")
+                const errData = await response.json().catch(() => ({}))
+                throw new Error(errData.error || "Failed to create agent")
             }
 
             const data = await response.json()
@@ -167,9 +169,9 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
 
             setStep(6) // Success Screen
             onAgentCreated()
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error creating agent:", error)
-            alert("Failed to create agent. Please check console.")
+            alert(`Failed to create agent: ${error.message || "Unknown error"}`)
         } finally {
             setIsSubmitting(false)
         }
@@ -264,33 +266,70 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
     )
 
     const renderStep2_Platform = () => (
-        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            {PLATFORMS.map((platform) => {
-                const Icon = platform.icon
-                const isSelected = formData.platform === platform.id
-                return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="space-y-3">
+                <Label>Select Platform</Label>
+                <div className="grid grid-cols-2 gap-4">
+                    {PLATFORMS.map((platform) => {
+                        const Icon = platform.icon
+                        const isSelected = formData.platform === platform.id
+                        return (
+                            <div
+                                key={platform.id}
+                                onClick={() => handlePlatformSelect(platform.id)}
+                                className={cn(
+                                    "p-4 border rounded-xl cursor-pointer transition-all hover:bg-muted/50",
+                                    isSelected
+                                        ? "border-primary bg-primary/5 ring-1 ring-primary shadow-sm"
+                                        : "border-border"
+                                )}
+                            >
+                                <div className="flex items-start gap-4">
+                                    <div className={cn("p-2 rounded-lg", isSelected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                                        <Icon className="h-6 w-6" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold">{platform.name}</h3>
+                                        <p className="text-sm text-muted-foreground mt-1">{platform.description}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+
+            <div className="space-y-3">
+                <Label>Target Operating System</Label>
+                <div className="flex gap-4">
                     <div
-                        key={platform.id}
-                        onClick={() => handlePlatformSelect(platform.id)}
+                        onClick={() => setFormData({ ...formData, target_os: 'linux' })}
                         className={cn(
-                            "p-4 border rounded-xl cursor-pointer transition-all hover:bg-muted/50",
-                            isSelected
-                                ? "border-primary bg-primary/5 ring-1 ring-primary shadow-sm"
-                                : "border-border"
+                            "flex-1 p-4 border rounded-xl cursor-pointer flex items-center gap-3 transition-all",
+                            formData.target_os === 'linux' ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/50"
                         )}
                     >
-                        <div className="flex items-start gap-4">
-                            <div className={cn("p-2 rounded-lg", isSelected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-                                <Icon className="h-6 w-6" />
-                            </div>
-                            <div>
-                                <h3 className="font-semibold">{platform.name}</h3>
-                                <p className="text-sm text-muted-foreground mt-1">{platform.description}</p>
-                            </div>
+                        <Terminal className="h-5 w-5" />
+                        <div>
+                            <div className="font-semibold">Linux / macOS</div>
+                            <div className="text-xs text-muted-foreground">Debian, Ubuntu, CentOS, macOS</div>
                         </div>
                     </div>
-                )
-            })}
+                    <div
+                        onClick={() => setFormData({ ...formData, target_os: 'windows' })}
+                        className={cn(
+                            "flex-1 p-4 border rounded-xl cursor-pointer flex items-center gap-3 transition-all",
+                            formData.target_os === 'windows' ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted/50"
+                        )}
+                    >
+                        <div className="h-5 w-5 flex items-center justify-center font-bold border rounded bg-muted">W</div>
+                        <div>
+                            <div className="font-semibold">Windows</div>
+                            <div className="text-xs text-muted-foreground">Server 2016+, Windows 10/11</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     )
 
@@ -415,7 +454,7 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
             </div>
             <h3 className="text-2xl font-bold">Ready to Deploy?</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
-                You are about to create a <strong>{formData.criticality}</strong> criticality <strong>{formData.platform.replace("_", " ")}</strong> in <strong>{formData.environment}</strong> environment.
+                You are about to create a <strong>{formData.criticality}</strong> criticality <strong>{formData.platform.replace("_", " ")}</strong> agent on <strong>{(formData.target_os === 'linux' ? "Linux" : "Windows")}</strong>.
             </p>
             <div className="grid grid-cols-2 gap-4 text-left max-w-lg mx-auto bg-muted/30 p-4 rounded-lg text-sm">
                 <div>
@@ -430,6 +469,7 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
                     <ul>
                         {formData.trust_mtls && <li className="text-emerald-500">• mTLS Enabled</li>}
                         {formData.trust_hardware && <li className="text-emerald-500">• HW Bound</li>}
+                        <li className="text-blue-500">• Target: {formData.target_os === 'linux' ? 'Linux' : 'Windows'}</li>
                     </ul>
                 </div>
             </div>
@@ -438,6 +478,13 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
 
     const renderSuccessScreen = () => {
         if (!installCommands) return null
+
+        // Only show the command for the selected OS, but allow toggling if user made a mistake?
+        // User asked "select which agent type ill be choosing; linux or windows" implies filtering.
+        // We will show the selected one prominently.
+
+        const isLinux = formData.target_os === 'linux'
+
         return (
             <div className="space-y-6 animate-in zoom-in duration-300">
                 <div className="text-center">
@@ -445,53 +492,58 @@ export function AddAgentWizard({ onSuggestClose, onAgentCreated }: AddAgentWizar
                         <Check className="h-6 w-6" />
                     </div>
                     <h2 className="text-2xl font-bold">Agent Created Successfully</h2>
-                    <p className="text-muted-foreground">Run this command on your target machine to install the agent.</p>
+                    <p className="text-muted-foreground">Run this command on your {isLinux ? "Linux Device" : "Windows Machine"} to install the agent.</p>
                 </div>
 
-                <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 shadow-inner">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2 text-slate-400 text-sm">
-                            <Terminal className="h-4 w-4" />
-                            <span>Linux / macOS</span>
+                {isLinux && (
+                    <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 shadow-inner">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 text-slate-400 text-sm">
+                                <Terminal className="h-4 w-4" />
+                                <span>Linux / macOS</span>
+                            </div>
+                            <span className="text-xs text-orange-400 flex items-center gap-1">⏱ Expires in 10m</span>
                         </div>
-                        <span className="text-xs text-orange-400 flex items-center gap-1">⏱ Expires in 10m</span>
+                        <div className="relative group">
+                            <pre className="text-slate-50 font-mono text-sm overflow-x-auto p-2 bg-slate-900/50 rounded">
+                                {installCommands.linux}
+                            </pre>
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute right-1 top-1 text-slate-400 hover:text-white hover:bg-slate-800"
+                                onClick={() => copyToClipboard(installCommands.linux, 'linux')}
+                            >
+                                {copied === 'linux' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                            </Button>
+                        </div>
                     </div>
-                    <div className="relative group">
-                        <pre className="text-slate-50 font-mono text-sm overflow-x-auto p-2 bg-slate-900/50 rounded">
-                            {installCommands.linux}
-                        </pre>
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute right-1 top-1 text-slate-400 hover:text-white hover:bg-slate-800"
-                            onClick={() => copyToClipboard(installCommands.linux, 'linux')}
-                        >
-                            {copied === 'linux' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                        </Button>
-                    </div>
-                </div>
+                )}
 
-                <div className="p-4 bg-slate-100 rounded-lg border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2 text-slate-600 text-sm">
-                            <Terminal className="h-4 w-4" />
-                            <span>Windows (PowerShell)</span>
+                {!isLinux && (
+                    <div className="p-4 bg-slate-100 rounded-lg border border-slate-200">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 text-slate-600 text-sm">
+                                <Terminal className="h-4 w-4" />
+                                <span>Windows (PowerShell)</span>
+                            </div>
+                            <span className="text-xs text-orange-400 flex items-center gap-1">⏱ Expires in 10m</span>
+                        </div>
+                        <div className="relative group">
+                            <pre className="text-slate-900 font-mono text-sm overflow-x-auto p-2 bg-white rounded border">
+                                {installCommands.windows}
+                            </pre>
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute right-1 top-1 text-slate-400 hover:text-slate-900"
+                                onClick={() => copyToClipboard(installCommands.windows, 'windows')}
+                            >
+                                {copied === 'windows' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                            </Button>
                         </div>
                     </div>
-                    <div className="relative group">
-                        <pre className="text-slate-900 font-mono text-sm overflow-x-auto p-2 bg-white rounded border">
-                            {installCommands.windows}
-                        </pre>
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute right-1 top-1 text-slate-400 hover:text-slate-900"
-                            onClick={() => copyToClipboard(installCommands.windows, 'windows')}
-                        >
-                            {copied === 'windows' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                        </Button>
-                    </div>
-                </div>
+                )}
 
                 <div className="flex justify-center pt-4">
                     <Button onClick={onSuggestClose} className="w-full sm:w-auto">Done</Button>

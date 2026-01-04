@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { DashboardShell } from "@/components/dashboard-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -46,7 +45,6 @@ interface Agent {
   status: "active" | "inactive" | "error" | "pending"
   region: string
   last_heartbeat: string
-  // eventsProcessed: number // Removed for now as it wasn't in DB schema yet
   description: string
   trust_score: number
   capabilities: string[]
@@ -58,12 +56,16 @@ export default function AgentsPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isWizardOpen, setIsWizardOpen] = useState(false)
+
+  // New State for Details/Revoke
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+
   const router = useRouter()
 
   useEffect(() => {
     async function checkAccess() {
       const supabase = createClient()
-
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -74,24 +76,19 @@ export default function AgentsPage() {
       }
 
       const { data: profile } = await supabase.from("users").select("*").eq("id", user.id).single()
-
       setCurrentUser(profile)
 
       if (profile?.role !== "super_admin") {
         router.push("/dashboard")
         return
       }
-
       fetchAgents()
     }
-
     checkAccess()
   }, [router])
 
   const fetchAgents = async () => {
     try {
-      // In a real app we'd fetch from our Flask API which proxies Supabase or adds logic
-      // For this demo let's hit the flask endpoint we built
       const res = await fetch('http://127.0.0.1:5000/api/v1/agents/')
       if (res.ok) {
         const data = await res.json()
@@ -101,6 +98,21 @@ export default function AgentsPage() {
       console.error("Failed to fetch agents", e)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleRevoke = async (id: string) => {
+    if (!confirm("Are you sure you want to revoke this agent? This action cannot be undone.")) return
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/api/v1/agents/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        fetchAgents() // Refresh list
+      } else {
+        alert("Failed to revoke agent")
+      }
+    } catch (e) {
+      console.error("Error revoking agent:", e)
+      alert("Error revoking agent")
     }
   }
 
@@ -183,7 +195,6 @@ export default function AgentsPage() {
                   onSuggestClose={() => setIsWizardOpen(false)}
                   onAgentCreated={() => {
                     fetchAgents()
-                    // Keep modal open to show success screen, user closes manually or we could set timeout
                   }}
                 />
               </div>
@@ -213,7 +224,6 @@ export default function AgentsPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">Trust Score (Avg)</CardTitle>
             </CardHeader>
             <CardContent>
-              {/* Quick calc for demo */}
               <div className="text-3xl font-bold text-emerald-500">
                 {agents.length > 0 ? Math.round(agents.reduce((acc, curr) => acc + (curr.trust_score || 0), 0) / agents.length) : 0}%
               </div>
@@ -310,9 +320,16 @@ export default function AgentsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>View Details</DropdownMenuItem>
-                          <DropdownMenuItem>View Logs</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">Revoke Agent</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setSelectedAgent(agent)
+                            setIsDetailsOpen(true)
+                          }}>View Details</DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleRevoke(agent.id)}
+                          >
+                            Revoke Agent
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -330,6 +347,53 @@ export default function AgentsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Agent Details</DialogTitle>
+            <DialogDescription>
+              Technical specifications and configuration for {selectedAgent?.name}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedAgent && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="font-semibold text-sm text-muted-foreground mb-1">Identity</h4>
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="font-medium mr-2">ID:</span> <span className="font-mono text-xs truncate max-w-[120px]">{selectedAgent.id}</span></div>
+                    <div><span className="font-medium mr-2">Name:</span> {selectedAgent.name}</div>
+                    <div><span className="font-medium mr-2">Region:</span> {selectedAgent.region}</div>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm text-muted-foreground mb-1">Status</h4>
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
+                    <div className="flex items-center gap-2">{getStatusBadge(selectedAgent.status)}</div>
+                    <div><span className="font-medium mr-2">Last Heartbeat:</span> {selectedAgent.last_heartbeat || "Never"}</div>
+                    <div><span className="font-medium mr-2">Trust Score:</span> <span className={getTrustScoreColor(selectedAgent.trust_score)}>{selectedAgent.trust_score}%</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold text-sm text-muted-foreground mb-1">Configuration</h4>
+                <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
+                  <div><span className="font-medium mr-2">Platform:</span> <span className="capitalize">{selectedAgent.platform?.replace(/_/g, " ")}</span></div>
+                  <div><span className="font-medium mr-2">Tags:</span> {(selectedAgent.tags || []).join(", ") || "None"}</div>
+                  <div><span className="font-medium mr-2">Capabilities:</span> {(selectedAgent.capabilities || []).join(", ")}</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 text-slate-50 font-mono text-xs rounded-lg overflow-x-auto max-h-40">
+                {JSON.stringify(selectedAgent, null, 2)}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </DashboardShell>
   )
 }

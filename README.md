@@ -64,12 +64,21 @@ The Security Intelligence Platform is designed to provide real-time insights and
 
 ## 🏃‍♂️ Running the Project
 
-You can run both servers simultaneously from the root directory:
+To ensure stability, please run the Backend and Frontend in **separate terminals**.
 
+### Terminal 1: Backend
 ```bash
-# From the root directory (DeepInv)
+cd security-intelligence-platform-backend
+python run.py
+```
+> The backend will start on `http://localhost:5000` and connect to your local Docker database.
+
+### Terminal 2: Frontend
+```bash
+cd security-intelligence-platform
 npm run dev
 ```
+> The frontend will start on `http://localhost:3000` and automatically proxy requests to the backend.
 
 -   **Frontend**: `http://localhost:3000`
 -   **Backend**: `http://localhost:5000`
