@@ -90,14 +90,17 @@ def create_agent():
         agent_id = response.data[0]['id']
 
         # Generate Install Commands
-        base_url = "http://127.0.0.1:5000" 
+        # Point to Nginx (HTTPS)
+        base_url = "https://localhost" 
         
         # Proper one-liner for Windows
-        # 1. Download script. 2. Execute it via iex. 3. Call function.
-        # Note: 'iex' executes the script which defines Register-Agent. Then we call it.
-        windows_cmd = f"iwr {base_url}/static/agents/install.ps1 | iex ; Register-Agent -Token '{install_token}' -Url '{base_url}'"
+        # 1. Download script (HTTPS). 2. Execute it via iex. 3. Call function.
+        # Note: We now point to the HTTPS URL.
+        # User needs to trust the self-signed root CA or use -SkipCertificateCheck for the DOWNLOAD ONLY.
+        # The script will handle the bootstrap security.
+        windows_cmd = f"$code = iwr {base_url}/static/agents/install.ps1 -UseBasicParsing -SkipCertificateCheck; Invoke-Expression $code.Content; Register-Agent -Token '{install_token}' -Url '{base_url}'"
 
-        linux_cmd = f"curl -fsSL {base_url}/static/agents/install.sh | AGENT_TOKEN='{install_token}' BASE_URL='{base_url}' bash"
+        linux_cmd = f"curl -k -fsSL {base_url}/static/agents/install.sh | AGENT_TOKEN='{install_token}' BASE_URL='{base_url}' bash"
 
         return jsonify({
             "message": "Agent created successfully",

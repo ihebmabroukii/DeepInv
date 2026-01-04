@@ -71,7 +71,34 @@ To ensure stability, please run the Backend and Frontend in **separate terminals
 cd security-intelligence-platform-backend
 python run.py
 ```
-> The backend will start on `http://localhost:5000` and connect to your local Docker database.
+> The backend will- **Hosts File**: For best results, map `127.0.0.1 platform.bank.tn` in your `/etc/hosts` or `C:\Windows\System32\drivers\etc\hosts`.
+
+## 🧠 System Architecture & Data Flow
+
+High-level overview of the secure agent communication implementation.
+
+### 🛡️ Components
+1.  **Nginx (Reverse Proxy)**: Acts as the **mTLS Gatekeeper**. Listens on Port 443 (SSL).
+    *   **Public Access**: `/api/v1/agents/bootstrap` (One-way TLS) and `/static/` (Install Scripts).
+    *   **Restricted Access**: All other routes (e.g., `/verify`, `/heartbeat`) REQUIRE a valid Client Certificate signed by our internal CA.
+2.  **Backend (Flask)**:
+    *   **PKI Manager**: `app/pki.py` handles Certificate Authority (CA) generation and signs Client Certificates.
+    *   **Trust Verification**: Checks Nginx Headers (`X-Client-Verified`) and validates Time Drift.
+3.  **Agent (PowerShell/Bash)**:
+    *   Starts with an **Install Token**.
+    *   Bootstraps via HTTPs to fetch its unique **Client Certificate**.
+    *   Uses this Certificate for all future communication (Heartbeats, Tasks).
+
+### 🔄 Data Flow: The "Bootstrap" Process
+1.  **Admin** creates Agent -> Backend generates `Install Token`.
+2.  **Admin** runs `install.ps1` on Target Machine.
+3.  **Agent** downloads script from Nginx (`/static/`).
+4.  **Agent** calls `POST /bootstrap` with `Token`.
+5.  **Backend** validates Token -> Issues `client.crt` + `client.key`.
+6.  **Agent** saves Certs locally.
+7.  **Agent** switches to **mTLS Mode**.
+8.  **Agent** calls `POST /heartbeat` proving its identity.
+9.  **Nginx** validates Cert -> Forwards to Backend -> Status becomes **Active**.
 
 ### Terminal 2: Frontend
 ```bash

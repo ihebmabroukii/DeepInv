@@ -10,7 +10,7 @@ import time
 BASE_URL = "https://localhost"
 DIRECT_URL = "http://localhost:5000"
 
-print("🚀 Starting Verificaton Pipeline...")
+print("[*] Starting Verificaton Pipeline...")
 
 def get_ignore_ssl_context():
     ctx = ssl.create_default_context()
@@ -19,21 +19,21 @@ def get_ignore_ssl_context():
     return ctx
 
 def test_connectivity():
-    print(f"\n1️⃣  Testing Connectivity ({BASE_URL})...")
+    print(f"\n[1] Testing Connectivity ({BASE_URL})...")
     try:
         url = f"{BASE_URL}/api/v1/health"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, context=get_ignore_ssl_context()) as response:
             if response.status == 200:
-                print("   ✅ Nginx/Backend is reachable.")
+                print("   [OK] Nginx/Backend is reachable.")
                 return True
     except Exception as e:
-        print(f"   ❌ Connection Failed: {e}")
+        print(f"   [FAIL] Connection Failed: {e}")
         print("   -> Ensure 'docker-compose up' is running.")
         return False
 
 def test_bootstrap():
-    print("\n2️⃣  Testing Agent Bootstrap (One-way TLS)...")
+    print("\n[2] Testing Agent Bootstrap (One-way TLS)...")
     # We need a valid token. For this test, ensuring the endpoint replies is enough,
     # or we can mock a token failure which proves connectivity.
     
@@ -43,17 +43,17 @@ def test_bootstrap():
     
     try:
         with urllib.request.urlopen(req, context=get_ignore_ssl_context()) as response:
-            print("   ❓ Unexpected Success with invalid token?")
+            print("   [?] Unexpected Success with invalid token?")
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            print("   ✅ Bootstrap Endpoint reachable (Correctly rejected invalid token).")
+            print("   [OK] Bootstrap Endpoint reachable (Correctly rejected invalid token).")
         else:
-             print(f"   ❌ Bootstrap Error: {e.code}")
+             print(f"   [FAIL] Bootstrap Error: {e.code}")
     except Exception as e:
-        print(f"   ❌ Bootstrap Failed: {e}")
+        print(f"   [FAIL] Bootstrap Failed: {e}")
 
 def test_mtls_enforcement():
-    print("\n3️⃣  Testing mTLS Enforcement...")
+    print("\n[3] Testing mTLS Enforcement...")
     # Trying to hit /verify WITHOUT a cert should fail at Nginx level
     # Nginx config: 'if ($ssl_client_verify != SUCCESS) { return 403; }'
     
@@ -63,19 +63,19 @@ def test_mtls_enforcement():
     
     try:
         with urllib.request.urlopen(req, context=get_ignore_ssl_context()) as response:
-             print("   ❌ Security Hole: /verify accessible without Certificate!")
+             print("   [FAIL] Security Hole: /verify accessible without Certificate!")
     except urllib.error.HTTPError as e:
         if e.code == 403:
-             print("   ✅ mTLS Enforced: Nginx correctly rejected request without certificate (403 Forbidden).")
+             print("   [OK] mTLS Enforced: Nginx correctly rejected request without certificate (403 Forbidden).")
         else:
-             print(f"   ⚠️  Unexpected Error code: {e.code}")
+             print(f"   [WARN] Unexpected Error code: {e.code}")
     except Exception as e:
-        print(f"   ❌ Test Failed: {e}")
+        print(f"   [FAIL] Test Failed: {e}")
 
 if __name__ == "__main__":
     if test_connectivity():
         test_bootstrap()
         test_mtls_enforcement()
-        print("\n✨ Verification Suite Complete.")
+        print("\n[*] Verification Suite Complete.")
     else:
-        print("\n❌ Aborting: System not reachable.")
+        print("\n[!] Aborting: System not reachable.")
