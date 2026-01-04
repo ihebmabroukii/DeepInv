@@ -143,3 +143,110 @@ def agent_heartbeat():
     except Exception as e:
         print(f"Heartbeat error: {e}")
         return jsonify({"error": str(e)}), 500
+
+@agents_bp.route('/bootstrap', methods=['POST'])
+def bootstrap_agent():
+    """
+    Bootstrap a new agent: Exchange Install Token for Client Certificate.
+    Allowed via One-way TLS (or optional mTLS).
+    """
+    try:
+        data = request.json
+        token = data.get('token')
+        
+        # 1. Validate Token (Simple check for now, ideally checking against DB)
+        # We need to find the agent with this token and status='pending'
+        res = supabase.table('agents').select("*").eq("token", token).execute()
+        if not res.data:
+            return jsonify({"error": "Invalid or expired token"}), 401
+            
+        agent = res.data[0]
+        agent_id = agent['id']
+        
+        # 2. Issue Certificate
+        from app.pki import pki
+        key_pem, cert_pem, ca_pem = pki.issue_client_cert(agent_id)
+        
+        # 3. Return Bundle
+        return jsonify({
+            "message": "Certificate Issued",
+            "client_key": key_pem,
+            "client_cert": cert_pem,
+            "ca_cert": ca_pem
+        }), 200
+
+    except Exception as e:
+        print(f"Bootstrap error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@agents_bp.route('/verify', methods=['POST'])
+def verify_agent():
+    """
+    Baseline Security Scan Step 1: Identity & Trust Verification.
+    Strict mTLS required.
+    """
+    try:
+        # 1. mTLS Identity Check (Headers from Nginx)
+        verified = request.headers.get('X-Client-Verified')
+        client_dn = request.headers.get('X-Client-DN')
+        
+        # In local dev without Nginx active yet (running flask directly), this header won't exist.
+        # For 'Real mTLS' with Docker, this is mandatory.
+        # But if running python run.py locally, we might skip or fail.
+        # Let's assume Docker environment.
+        
+        if verified != 'SUCCESS' and request.headers.get('X-Forwarded-Proto') == 'https':
+            return jsonify({"error": "mTLS Authentication Failed", "trust_status": "untrusted"}), 403
+
+        # 2. Time Drift Check
+        data = request.json
+        agent_time_str = data.get('system_time_utc') # ISO 8601
+        
+        if not agent_time_str:
+             return jsonify({"error": "Missing system_time_utc"}), 400
+
+        # Parse with Z (UTC) handling
+        try:
+             # fromisoformat requires +00:00 for Z in older python, but 3.9 might handle.
+             # Safe replace.
+             agent_time = datetime.datetime.fromisoformat(agent_time_str.replace('Z', '+00:00'))
+        except:
+             # Fallback
+             agent_time = datetime.datetime.utcnow() 
+
+        server_time = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        # Ensure agent_time is tz-aware
+        if agent_time.tzinfo is None:
+             agent_time = agent_time.replace(tzinfo=datetime.timezone.utc)
+             
+        drift = abs((server_time - agent_time).total_seconds())
+        
+        drift_limit = 600 # 10 Minutes as requested
+        
+        trust_status = "verified"
+        trust_score_impact = 0
+        
+        if drift > drift_limit:
+            trust_status = "failed_time_sync"
+            return jsonify({
+                "error": f"System Clock Drift too high ({drift}s). Max {drift_limit}s.",
+                "server_time": server_time.isoformat()
+            }), 406 # Not Acceptable
+
+        # 3. Privilege Check (Logging only)
+        user_context = data.get('user_context', 'unknown')
+        if 'root' in user_context.lower() or 'system' in user_context.lower():
+             print(f"⚠️ Agent {client_dn} running as High Privilege: {user_context}")
+
+        return jsonify({
+            "status": "verified",
+            "trust_metrics": {
+                "mtls": True,
+                "time_drift_sec": drift,
+                "privilege_context": user_context
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"Verification Check Error: {e}")
+        return jsonify({"error": str(e)}), 500

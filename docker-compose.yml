@@ -1,9 +1,40 @@
 version: '3.8'
 
 services:
+  backend:
+    build: 
+      context: ./security-intelligence-platform-backend
+    container_name: security_platform_backend
+    restart: always
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=production
+      - LOCAL_DB_URL=postgresql://admin:REDACTED@db:5432/security_platform
+      # Supabase URL/Key vars if needed for hybrid mode
+    volumes:
+      - ./certs:/app/certs  # Shared Certs Volume
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: security_platform_nginx
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro # Shared Certs Volume
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
   db:
     image: postgres:15-alpine
     container_name: security_platform_db
+    restart: always
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: REDACTED
@@ -12,7 +43,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: always
+    networks:
+      - app_network
 
 volumes:
   postgres_data:
+
+networks:
+  app_network:
+    driver: bridge

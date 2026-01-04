@@ -20,7 +20,15 @@ def create_app(config_class=Config):
     if app.config.get('USE_LOCAL_DB', True):
         from app.local_db import LocalClient
         print("Using Local Database (PostgreSQL)")
+        print("Using Local Database (PostgreSQL)")
         supabase = LocalClient()
+        
+        # Initialize PKI (Generate CA if missing)
+        from app.pki import pki
+        if app.config.get('FLASK_ENV') != 'development' or True: # Always init for this demo
+             pki.ensure_root_ca()
+             pki.generate_server_cert(hostname="localhost")
+             pki.generate_server_cert(hostname="platform.bank.tn")
     else:
         from supabase import create_client
         print("Using Remote Supabase")
