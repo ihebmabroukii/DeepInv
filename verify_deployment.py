@@ -21,7 +21,7 @@ def get_ignore_ssl_context():
 def test_connectivity():
     print(f"\n[1] Testing Connectivity ({BASE_URL})...")
     try:
-        url = f"{BASE_URL}/api/v1/health"
+        url = f"{BASE_URL}/health"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, context=get_ignore_ssl_context()) as response:
             if response.status == 200:

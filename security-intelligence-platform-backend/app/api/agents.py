@@ -60,6 +60,11 @@ def create_agent():
             if field not in data:
                 return jsonify({"error": f"Missing required field: {field}"}), 400
 
+        # Validate Unique Name
+        existing = supabase.table('agents').select("id").eq("name", data['name']).execute()
+        if existing.data:
+            return jsonify({"error": "Agent with this name already exists"}), 409
+
         # Generate a temporary installation token
         install_token = secrets.token_urlsafe(32)
         
