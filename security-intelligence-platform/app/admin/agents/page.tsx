@@ -49,6 +49,14 @@ interface Agent {
   trust_score: number
   capabilities: string[]
   tags: string[]
+  system_info?: {
+    hostname?: string
+    os?: string
+    kernel?: string
+    uptime?: string
+    security_software?: string[]
+    interfaces?: { ip: string; interface: string; mac?: string }[]
+  }
 }
 
 export default function AgentsPage() {
@@ -349,7 +357,7 @@ export default function AgentsPage() {
       </div>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Agent Details</DialogTitle>
             <DialogDescription>
@@ -358,37 +366,101 @@ export default function AgentsPage() {
           </DialogHeader>
 
           {selectedAgent && (
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-6 py-4">
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={async () => {
+                    if (!confirm("Trigger remote system scan?")) return;
+                    try {
+                      const res = await fetch(`http://127.0.0.1:5000/api/v1/agents/${selectedAgent.id}/scan`, { method: 'POST' });
+                      if (res.ok) alert("Scan Command Queued. Data will update shortly.");
+                      else alert("Failed to queue scan.");
+                    } catch (e) { console.error(e); alert("Error queuing scan."); }
+                  }}
+                >
+                  <Activity className="h-4 w-4" /> Scan System
+                </Button>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-semibold text-sm text-muted-foreground mb-1">Identity</h4>
-                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="font-medium mr-2">ID:</span> <span className="font-mono text-xs truncate max-w-[120px]">{selectedAgent.id}</span></div>
-                    <div><span className="font-medium mr-2">Name:</span> {selectedAgent.name}</div>
-                    <div><span className="font-medium mr-2">Region:</span> {selectedAgent.region}</div>
+                  <h4 className="font-semibold text-sm text-foreground mb-2 flex items-center gap-2"><Server className="w-4 h-4" /> Identity</h4>
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm border">
+                    <div className="flex justify-between"><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{selectedAgent.id}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Name:</span> <span className="font-medium">{selectedAgent.name}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Region:</span> <span>{selectedAgent.region}</span></div>
                   </div>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-sm text-muted-foreground mb-1">Status</h4>
-                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
-                    <div className="flex items-center gap-2">{getStatusBadge(selectedAgent.status)}</div>
-                    <div><span className="font-medium mr-2">Last Heartbeat:</span> {selectedAgent.last_heartbeat || "Never"}</div>
-                    <div><span className="font-medium mr-2">Trust Score:</span> <span className={getTrustScoreColor(selectedAgent.trust_score)}>{selectedAgent.trust_score}%</span></div>
+                  <h4 className="font-semibold text-sm text-foreground mb-2 flex items-center gap-2"><Activity className="w-4 h-4" /> Status</h4>
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm border">
+                    <div className="flex justify-between items-center"><span className="text-muted-foreground">State:</span> {getStatusBadge(selectedAgent.status)}</div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Heartbeat:</span> <span>{selectedAgent.last_heartbeat ? new Date(selectedAgent.last_heartbeat).toLocaleString() : "Never"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Trust Score:</span> <span className={getTrustScoreColor(selectedAgent.trust_score)}>{selectedAgent.trust_score}%</span></div>
                   </div>
                 </div>
               </div>
 
+              {/* System Fingerprint Section */}
+              {selectedAgent.system_info && (selectedAgent.system_info.hostname || selectedAgent.system_info.os) && (
+                <div>
+                  <h4 className="font-semibold text-sm text-foreground mb-2 flex items-center gap-2"><Globe className="w-4 h-4" /> System Fingerprint (Live)</h4>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900 border rounded-lg space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Hostname:</span> <span className="font-mono">{selectedAgent.system_info.hostname || "N/A"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">OS:</span> <span>{selectedAgent.system_info.os || "N/A"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Kernel:</span> <span className="font-mono text-xs">{selectedAgent.system_info.kernel || "N/A"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Uptime:</span> <span>{selectedAgent.system_info.uptime || "N/A"}</span></div>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900 border rounded-lg space-y-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground block mb-1">Security Software:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {(selectedAgent.system_info.security_software && selectedAgent.system_info.security_software.length > 0)
+                            ? selectedAgent.system_info.security_software.map((sw: string, i: number) => <Badge key={i} variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">{sw}</Badge>)
+                            : <span className="text-muted-foreground italic">None Detected</span>
+                          }
+                        </div>
+                      </div>
+                      <div className="mt-2">
+                        <span className="text-muted-foreground block mb-1">Interfaces:</span>
+                        <div className="max-h-20 overflow-y-auto space-y-1">
+                          {(selectedAgent.system_info.interfaces || []).map((inf: any, i: number) => (
+                            <div key={i} className="flex justify-between text-xs font-mono bg-background p-1 rounded border">
+                              <span>{inf.interface}</span>
+                              <span>{inf.ip}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <h4 className="font-semibold text-sm text-muted-foreground mb-1">Configuration</h4>
-                <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
-                  <div><span className="font-medium mr-2">Platform:</span> <span className="capitalize">{selectedAgent.platform?.replace(/_/g, " ")}</span></div>
-                  <div><span className="font-medium mr-2">Tags:</span> {(selectedAgent.tags || []).join(", ") || "None"}</div>
-                  <div><span className="font-medium mr-2">Capabilities:</span> {(selectedAgent.capabilities || []).join(", ")}</div>
+                <h4 className="font-semibold text-sm text-foreground mb-2 flex items-center gap-2"><Container className="w-4 h-4" /> Configuration</h4>
+                <div className="p-3 bg-muted/50 rounded-lg space-y-2 text-sm border">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Platform:</span> <span className="capitalize">{selectedAgent.platform?.replace(/_/g, " ")}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Tags:</span> <span>{(selectedAgent.tags || []).join(", ") || "None"}</span></div>
+                  <div><span className="text-muted-foreground block mb-1">Capabilities:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {(selectedAgent.capabilities || []).map(c => <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>)}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-950 text-slate-50 font-mono text-xs rounded-lg overflow-x-auto max-h-40">
-                {JSON.stringify(selectedAgent, null, 2)}
+              <div className="mt-2">
+                <details className="text-xs text-muted-foreground cursor-pointer">
+                  <summary>View Raw JSON</summary>
+                  <pre className="mt-2 p-3 bg-slate-950 text-slate-50 rounded-lg overflow-x-auto max-h-40">
+                    {JSON.stringify(selectedAgent, null, 2)}
+                  </pre>
+                </details>
               </div>
             </div>
           )}

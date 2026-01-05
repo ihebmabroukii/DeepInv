@@ -189,9 +189,21 @@ class LocalClient:
                         install_command TEXT,
                         token TEXT,
                         config JSONB DEFAULT '{}'::jsonb,
+                        system_info JSONB DEFAULT '{}'::jsonb,
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         updated_at TIMESTAMPTZ DEFAULT NOW(),
                         created_by UUID
+                    );
+
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        agent_id UUID REFERENCES agents(id),
+                        type TEXT NOT NULL,
+                        status TEXT DEFAULT 'pending',
+                        payload JSONB DEFAULT '{}'::jsonb,
+                        result JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
                     );
                 """)
                 

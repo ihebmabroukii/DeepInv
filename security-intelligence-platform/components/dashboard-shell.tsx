@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import {
   LayoutDashboard,
@@ -77,8 +77,14 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [selectedRegion, setSelectedRegion] = useState("global")
   const [selectedDepartment, setSelectedDepartment] = useState("all")
+  const [isMounted, setIsMounted] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
+
+  // Prevent Hydration Mismatch for Radix UI Components
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   const riskStatus = "orange" // Mock risk status
 
@@ -115,41 +121,45 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
 
             <div className="flex items-center gap-2 ml-8">
               <Building2 className="h-4 w-4 text-muted-foreground" />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm" className="gap-2">
-                    {regions.find((r) => r.value === selectedRegion)?.label}
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuLabel>Select Region</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {regions.map((region) => (
-                    <DropdownMenuItem key={region.value} onClick={() => setSelectedRegion(region.value)}>
-                      {region.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {isMounted && (
+                <>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="secondary" size="sm" className="gap-2">
+                        {regions.find((r) => r.value === selectedRegion)?.label}
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuLabel>Select Region</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {regions.map((region) => (
+                        <DropdownMenuItem key={region.value} onClick={() => setSelectedRegion(region.value)}>
+                          {region.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm" className="gap-2">
-                    {departments.find((d) => d.value === selectedDepartment)?.label}
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuLabel>Select Department</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {departments.map((dept) => (
-                    <DropdownMenuItem key={dept.value} onClick={() => setSelectedDepartment(dept.value)}>
-                      {dept.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="secondary" size="sm" className="gap-2">
+                        {departments.find((d) => d.value === selectedDepartment)?.label}
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuLabel>Select Department</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {departments.map((dept) => (
+                        <DropdownMenuItem key={dept.value} onClick={() => setSelectedDepartment(dept.value)}>
+                          {dept.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

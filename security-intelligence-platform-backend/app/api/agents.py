@@ -99,11 +99,11 @@ def create_agent():
         base_url = "https://localhost" 
         
         # Proper one-liner for Windows
-        # 1. Download script (HTTPS). 2. Execute it via iex. 3. Call function.
-        # Note: We now point to the HTTPS URL.
-        # User needs to trust the self-signed root CA or use -SkipCertificateCheck for the DOWNLOAD ONLY.
-        # The script will handle the bootstrap security.
-        windows_cmd = f"$code = iwr {base_url}/static/agents/install.ps1 -UseBasicParsing -SkipCertificateCheck; Invoke-Expression $code.Content; Register-Agent -Token '{install_token}' -Url '{base_url}'"
+        # 1. Force TLS 1.2 (Crucial for PS 5.1).
+        # 2. Trust Self-Signed Certs for WebClient.
+        # 3. Use WebClient instead of iwr for robustness.
+        # 4. Invoke Expression.
+        windows_cmd = f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; $wc = New-Object System.Net.WebClient; $wc.Headers['User-Agent'] = 'PowerShell'; Invoke-Expression $wc.DownloadString('{base_url}/static/agents/install.ps1'); Register-Agent -Token '{install_token}' -Url '{base_url}'"
 
         linux_cmd = f"curl -k -fsSL {base_url}/static/agents/install.sh | AGENT_TOKEN='{install_token}' BASE_URL='{base_url}' bash"
 
@@ -118,6 +118,76 @@ def create_agent():
         print(f"Error creating agent: {e}")
         return jsonify({"error": str(e)}), 500
 
+@agents_bp.route('/<agent_id>/scan', methods=['POST'])
+def trigger_scan(agent_id):
+    """
+    Step 2.1: Trigger On-Demand Fingerprint Scan.
+    Creates a pending task for the agent.
+    """
+    try:
+        # Create Task
+        task = {
+            "agent_id": agent_id,
+            "type": "fingerprint",
+            "status": "pending",
+            "payload": {},
+            "created_at": datetime.datetime.utcnow().isoformat()
+        }
+        res = supabase.table('tasks').insert(task).execute()
+        return jsonify({"message": "Scan command queued", "task": res.data[0]}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@agents_bp.route('/tasks/result', methods=['POST'])
+def task_result():
+    """
+    Step 2.2: Agent reports task execution result.
+    Strict mTLS required.
+    """
+    try:
+        # mTLS Check
+        verified = request.headers.get('X-Client-Verified')
+        if verified != 'SUCCESS' and request.headers.get('X-Forwarded-Proto') == 'https':
+            return jsonify({"error": "mTLS Authentication Failed"}), 403
+
+        data = request.json
+        token = data.get('token')
+        task_id = data.get('task_id')
+        result_data = data.get('result', {})
+        
+        if not token or not task_id:
+             return jsonify({"error": "Missing token or task_id"}), 400
+
+        # Update Task Status
+        supabase.table('tasks').update({
+            "status": "completed",
+            "result": result_data,
+            "updated_at": datetime.datetime.utcnow().isoformat()
+        }).eq("id", task_id).execute()
+        
+        # If type was fingerprint, also update agent record
+        # Ideally we check task type first, but we can infer or pass it.
+        # For simplicity, if structure matches system_info, update it.
+        if 'os' in result_data or 'hostname' in result_data:
+             system_info = {
+                "os": result_data.get("os"),
+                "kernel": result_data.get("kernel"),
+                "hostname": result_data.get("hostname"),
+                "interfaces": result_data.get("interfaces", []),
+                "uptime": result_data.get("uptime"),
+                "security_software": result_data.get("security_software", [])
+            }
+             supabase.table('agents').update({
+                "system_info": system_info
+             }).eq("token", token).execute()
+
+        return jsonify({"status": "received"}), 200
+
+    except Exception as e:
+        print(f"Task Result Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @agents_bp.route('/heartbeat', methods=['POST'])
 def agent_heartbeat():
     try:
@@ -126,31 +196,55 @@ def agent_heartbeat():
         
         if not token:
             return jsonify({"error": "Missing token"}), 400
-            
-        # Find agent by token
-        # In a real app we'd query by token.
-        # supabase.table('agents').select("id").eq("token", token).single() 
-        # But for now, since we haven't indexed token or ensured unique in schema strictly,
-        # let's assume it works.
         
         current_time = datetime.datetime.utcnow().isoformat()
         
-        # Update agent status and heartbeat
-        response = supabase.table('agents').update({
+        # Update heartbeat
+        # We need agent ID to check tasks.
+        agent_res = supabase.table('agents').update({
             "status": "active",
             "last_heartbeat": current_time,
             "metrics": data.get('metrics', {})
         }).eq("token", token).execute()
         
-        if not response.data:
-             # Agent not found or token mismatch (if unique)
-             return jsonify({"error": "Invalid token"}), 404
+        if not agent_res.data:
+              return jsonify({"error": "Invalid token"}), 404
+              
+        agent_id = agent_res.data[0]['id']
         
-        return jsonify({"status": "received", "timestamp": current_time}), 200
+        # Check for Pending Tasks
+        # In a real system, we might limit this check frequency or cache it.
+        tasks_res = supabase.table('tasks').select("*").eq("agent_id", agent_id).eq("status", "pending").execute()
+        
+        response_data = {
+            "status": "received", 
+            "timestamp": current_time,
+            "tasks": []
+        }
+        
+        if tasks_res.data:
+            # Send tasks to agent
+            # Only send bare minimum
+            for t in tasks_res.data:
+                response_data['tasks'].append({
+                    "task_id": t['id'],
+                    "type": t['type'],
+                    "payload": t['payload']
+                })
+        
+        return jsonify(response_data), 200
 
     except Exception as e:
         print(f"Heartbeat error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# Legacy Fingerprint Endpoint (Optional - kept for compatibility if needed, but redundant now)
+@agents_bp.route('/fingerprint', methods=['POST'])
+def agent_fingerprint():
+    """
+    Legacy/Direct Fingerprint collection.
+    """
+    return jsonify({"status": "deprecated", "message": "Use task system"}), 200
 
 @agents_bp.route('/bootstrap', methods=['POST'])
 def bootstrap_agent():
@@ -258,3 +352,5 @@ def verify_agent():
     except Exception as e:
         print(f"Verification Check Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+

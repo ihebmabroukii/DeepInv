@@ -12,7 +12,8 @@ services:
       - LOCAL_DB_URL=postgresql://admin:REDACTED@db:5432/security_platform
       # Supabase URL/Key vars if needed for hybrid mode
     volumes:
-      - ./certs:/app/certs  # Shared Certs Volume
+      - ./certs:/app/certs
+      - ./security-intelligence-platform-backend/app:/app/app  # Hot Reload Code
     depends_on:
       - db
     networks:
