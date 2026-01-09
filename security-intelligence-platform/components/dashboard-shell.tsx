@@ -44,6 +44,7 @@ const navigation = [
   { name: "Rules & Automation", href: "/rules", icon: Workflow, section: "main" },
   { name: "AI Insights", href: "/ai-insights", icon: Brain, section: "main" },
   { name: "Timeline", href: "/timeline", icon: Clock, section: "main" },
+  { name: "Audit Log", href: "/audit", icon: FileText, section: "bottom", superAdminOnly: true },
   { name: "Reports", href: "/reports", icon: FileText, section: "bottom" },
   { name: "Users", href: "/settings/users", icon: Users, section: "bottom", adminOnly: true },
   { name: "Agents", href: "/admin/agents", icon: Bot, section: "bottom", superAdminOnly: true },
@@ -187,21 +188,23 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
             <ThemeToggle />
 
             {/* User Profile */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <User className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => router.push("/settings")}>Settings</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push("/settings/profile")}>Profile</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {isMounted && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="rounded-full">
+                    <User className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push("/settings")}>Settings</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push("/settings/profile")}>Profile</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </header>

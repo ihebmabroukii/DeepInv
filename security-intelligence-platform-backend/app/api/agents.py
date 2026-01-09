@@ -33,19 +33,6 @@ def get_agent_details(agent_id):
         print(f"Error fetching agent {agent_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@agents_bp.route('/<agent_id>', methods=['DELETE'])
-def delete_agent(agent_id):
-    try:
-        # Assuming permissions are handled by middleware
-        # .delete().eq("id", agent_id).execute()
-        response = supabase.table('agents').delete().eq("id", agent_id).execute()
-        
-        # Check response. data might be empty if not found, but operation is successful
-        return jsonify({"message": "Agent deleted successfully", "details": response.data}), 200
-        
-    except Exception as e:
-        print(f"Error deleting agent {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
 
 
 @agents_bp.route('', methods=['POST'])
@@ -353,4 +340,23 @@ def verify_agent():
         print(f"Verification Check Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@agents_bp.route('/<agent_id>', methods=['DELETE'])
+def delete_agent(agent_id):
+    """
+    Delete/Revoke an agent.
+    Removes agent from database and invalidates its certificates.
+    """
+    try:
+        # Delete the agent
+        response = supabase.table('agents').delete().eq("id", agent_id).execute()
+        
+        if not response.data:
+            return jsonify({"error": "Agent not found"}), 404
+        
+        return jsonify({"message": "Agent revoked successfully"}), 200
+        
+    except Exception as e:
+        print(f"Delete agent error: {e}")
+        return jsonify({"error": str(e)}), 500
 

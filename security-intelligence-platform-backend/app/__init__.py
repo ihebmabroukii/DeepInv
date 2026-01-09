@@ -42,8 +42,11 @@ def create_app(config_class=Config):
     from app.api import bp as api_bp
     app.register_blueprint(api_bp, url_prefix='/api/v1')
     
+    
     from app.api.agents import agents_bp
+    from app.api.audit import audit_bp
     app.register_blueprint(agents_bp, url_prefix='/api/v1/agents')
+    app.register_blueprint(audit_bp, url_prefix='/api/v1/audit')
 
     @app.route('/')
     def index():
