@@ -8,6 +8,8 @@ This directory contains the deployment configuration for a Tier-1 SOC environmen
 - **Wazuh Manager** (SIEM Engine)
 - **Wazuh Agent** (Simulation)
 - **Suricata** (IDS)
+- **WireGuard** (VPN)
+- **ModSecurity** (WAF)
 
 ## Prerequisites
 - Docker & Docker Compose
@@ -42,6 +44,29 @@ docker-compose up -d
      curl http://testmyids.com
      ```
    - Check Wazuh "Security events" for the alert.
+
+## VPN & Firewall Usage
+
+### 1. Configure VPN (WireGuard)
+The WireGuard container will automatically generate peer configurations on the first run.
+- **Get Client Config**:
+  ```powershell
+  docker logs wireguard
+  ```
+  Or find the file in `./vpn/config/peer1/peer1.conf`.
+- **Connect**: Import this config into your WireGuard client. You can now access internal services via VPN (e.g., `10.13.13.x`).
+
+### 2. Test Firewall (WAF)
+The WAF (ModSecurity) is listening on **Port 80** and proxies traffic to Kibana.
+- **Access via WAF**: Open `http://localhost`. You should see the Kibana login page.
+- **Attack Simulation**:
+  ```powershell
+  curl "http://localhost/?id=' OR 1=1"
+  ```
+  **Result**: You should receive a `403 Forbidden` response.
+- **Verify Logs**:
+  - In Kibana, go to **Discover**.
+  - Search for `tags: modsecurity`. You will see the detailed audit log for the blocked request.
 
 ## Troubleshooting
 - **Plugin Install Failed**: Check Kibana logs: `docker-compose logs kibana`.

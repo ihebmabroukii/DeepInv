@@ -61,6 +61,7 @@ services:
     volumes:
       - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
       - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - waf-logs:/usr/share/logstash/waf-logs
     depends_on:
       - elasticsearch
     networks:
@@ -120,6 +121,49 @@ services:
     networks:
       - wazuh-network
 
+  vpn:
+    image: linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - SERVERURL=auto
+      - SERVERPORT=51820
+      - PEERS=1
+      - PEERDNS=auto
+      - INTERNAL_SUBNET=10.13.13.0
+      - ALLOWEDIPS=0.0.0.0/0
+    volumes:
+      - ./vpn/config:/config
+      - /lib/modules:/lib/modules
+    ports:
+      - "51820:51820/udp"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+    networks:
+      - wazuh-network
+
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: waf
+    environment:
+      - PARANOIA=1
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - PROXY_SSL=off
+      - BACKEND=http://kibana:5601
+    ports:
+      - "80:80"
+    volumes:
+      - waf-logs:/var/log
+    networks:
+      - wazuh-network
+
 volumes:
   elasticsearch-data:
   wazuh-api-configuration:
@@ -132,6 +176,7 @@ volumes:
   wazuh-agentless:
   wazuh-wodles:
   suricata-logs:
+  waf-logs:
 
 networks:
   wazuh-network:
