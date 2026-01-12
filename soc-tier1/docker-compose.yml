@@ -29,7 +29,7 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
       - WAZUH_API_URL=https://wazuh.manager:55000/
       - WAZUH_USER=wazuh
       - WAZUH_PASSWORD=wazuh
@@ -39,11 +39,9 @@ services:
       - elasticsearch
     volumes:
       - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml
+      - ./kibana/config/wazuh.yml:/usr/share/kibana/data/wazuh/config/wazuh.yml
     command: >
-      /bin/bash -c "
-      /usr/share/kibana/bin/kibana-plugin list | grep wazuh || /usr/share/kibana/bin/kibana-plugin install https://packages.wazuh.com/4.x/ui/kibana/wazuh_kibana-${WAZUH_PLUGIN_VERSION}.zip;
-      /usr/local/bin/kibana-docker
-      "
+      /bin/bash -c " /usr/share/kibana/bin/kibana-plugin list | grep wazuh || /usr/share/kibana/bin/kibana-plugin install https://packages.wazuh.com/4.x/ui/kibana/wazuh_kibana-${WAZUH_PLUGIN_VERSION}.zip; /usr/local/bin/kibana-docker "
     networks:
       - wazuh-network
 
@@ -53,7 +51,7 @@ services:
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
     ports:
       - "5044:5044"
       - "5000:5000/tcp"
@@ -89,20 +87,11 @@ services:
       - wazuh-active-response:/var/ossec/active-response/bin
       - wazuh-agentless:/var/ossec/agentless
       - wazuh-wodles:/var/ossec/wodles
-      - ./wazuh-manager/config/ossec.conf:/var/ossec/etc/ossec.conf
+      - suricata-logs:/var/log/suricata
+      - ./wazuh-manager/config/filebeat.yml:/etc/filebeat/filebeat.yml
+      # - ./wazuh-manager/config/ossec.conf:/var/ossec/etc/ossec.conf
     depends_on:
       - elasticsearch
-    networks:
-      - wazuh-network
-
-  wazuh.agent:
-    image: wazuh/wazuh-agent:${WAZUH_VERSION}
-    container_name: wazuh.agent
-    environment:
-      - WAZUH_MANAGER_IP=wazuh.manager
-      - WAZUH_AGENT_NAME=wazuh-agent-docker
-    depends_on:
-      - wazuh.manager
     networks:
       - wazuh-network
 
@@ -117,9 +106,7 @@ services:
     volumes:
       - ./suricata/config:/etc/suricata
       - suricata-logs:/var/log/suricata
-    command: -i eth0  # CHANGE THIS TO YOUR HOST INTERFACE
-    networks:
-      - wazuh-network
+    command: -i eth0 # CHANGE THIS TO YOUR HOST INTERFACE
 
   vpn:
     image: linuxserver/wireguard:latest
@@ -177,6 +164,7 @@ volumes:
   wazuh-wodles:
   suricata-logs:
   waf-logs:
+
 
 networks:
   wazuh-network:

@@ -1,0 +1,35 @@
+# Wazuh - Filebeat configuration file
+filebeat.modules:
+  - module: wazuh
+    alerts:
+      enabled: true
+    archives:
+      enabled: true
+
+setup.template.json.enabled: false
+# setup.template.json.path: '/etc/filebeat/wazuh-template.json'
+# setup.template.json.name: 'wazuh'
+setup.template.overwrite: false
+setup.ilm.enabled: false
+setup.template.enabled: false
+
+output.elasticsearch:
+  hosts: ['http://elasticsearch:9200']
+  username: 'elastic'
+  password: '${ELASTIC_PASSWORD}'
+  index: "wazuh-alerts-4.x-%{+YYYY.MM.dd}"
+  # ssl.verification_mode: none
+
+setup.kibana:
+  host: "http://kibana:5601"
+  username: "elastic"
+  password: "${ELASTIC_PASSWORD}"
+
+logging.metrics.enabled: false
+
+seccomp:
+  default_action: allow
+  syscalls:
+  - action: allow
+    names:
+    - rseq
