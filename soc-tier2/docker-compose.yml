@@ -1,0 +1,34 @@
+version: '3'
+services:
+  elasticsearch:
+    image: elasticsearch:7.17.15
+    container_name: cortex-elasticsearch
+    environment:
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - cortex_net
+    restart: unless-stopped
+
+  cortex:
+    image: thehiveproject/cortex:3.1.7
+    container_name: cortex
+    depends_on:
+      - elasticsearch
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./application.conf:/etc/cortex/application.conf
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - cortex_net
+    restart: unless-stopped
+
+networks:
+  cortex_net:
+
+
+volumes:
+  elasticsearch_data:
