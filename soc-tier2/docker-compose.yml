@@ -1,34 +1,87 @@
 version: '3'
 services:
-  elasticsearch:
+  # Cortex Elasticsearch (existing)
+  cortex-elasticsearch:
     image: elasticsearch:7.17.15
     container_name: cortex-elasticsearch
     environment:
       - "discovery.type=single-node"
       - "xpack.security.enabled=false"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - cortex-elasticsearch-data:/usr/share/elasticsearch/data
     networks:
-      - cortex_net
+      - soc-tier2-net
     restart: unless-stopped
 
+  # TheHive Elasticsearch (new)
+  thehive-elasticsearch:
+    image: elasticsearch:7.17.15
+    container_name: thehive-elasticsearch
+    environment:
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - thehive-elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+
+  # Cassandra database for TheHive
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    environment:
+      - CASSANDRA_CLUSTER_NAME=thp
+      - MAX_HEAP_SIZE=1G
+      - HEAP_NEWSIZE=256M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+
+  # Cortex (existing, updated network)
   cortex:
     image: thehiveproject/cortex:3.1.7
     container_name: cortex
     depends_on:
-      - elasticsearch
+      - cortex-elasticsearch
     ports:
       - "9001:9001"
     volumes:
       - ./application.conf:/etc/cortex/application.conf
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - cortex_net
+      - soc-tier2-net
     restart: unless-stopped
 
-networks:
-  cortex_net:
+  # TheHive (new)
+  thehive:
+    image: strangebee/thehive:5.5
+    container_name: thehive
+    depends_on:
+      - cassandra
+      - thehive-elasticsearch
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./thehive.conf:/etc/thehive/application.conf
+      - thehive-data:/opt/thp/thehive/data
+    environment:
+      - JVM_OPTS=-Xms1g -Xmx1g
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+    command: "--no-config-secret"
 
+networks:
+  soc-tier2-net:
+    driver: bridge
 
 volumes:
-  elasticsearch_data:
+  cortex-elasticsearch-data:
+  thehive-elasticsearch-data:
+  cassandra-data:
+  thehive-data:
