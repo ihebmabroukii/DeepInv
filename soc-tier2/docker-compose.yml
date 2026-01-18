@@ -76,6 +76,58 @@ services:
     restart: unless-stopped
     command: "--no-config-secret"
 
+  # MariaDB for MISP
+  misp-db:
+    image: mariadb:10.11
+    container_name: misp-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=MispRootPass2026!
+      - MYSQL_DATABASE=misp
+      - MYSQL_USER=misp
+      - MYSQL_PASSWORD=MispDbPass2026!
+    volumes:
+      - misp-db-data:/var/lib/mysql
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+
+  # Redis for MISP
+  misp-redis:
+    image: redis:7.2-alpine
+    container_name: misp-redis
+    volumes:
+      - misp-redis-data:/data
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+
+  # MISP Platform
+  misp:
+    image: coolacid/misp-docker:core-latest
+    container_name: misp
+    depends_on:
+      - misp-db
+      - misp-redis
+    ports:
+      - "8080:80"
+      - "8443:443"
+    environment:
+      - MYSQL_HOST=misp-db
+      - MYSQL_DATABASE=misp
+      - MYSQL_USER=misp
+      - MYSQL_PASSWORD=MispDbPass2026!
+      - REDIS_FQDN=misp-redis
+      - MISP_BASEURL=http://localhost:8080
+      - TIMEZONE=Europe/Brussels
+      - ADMIN_EMAIL=admin@misp.local
+      - ADMIN_PASSWORD=MispAdmin2026!
+      - ADMIN_ORG=SOC-Tier2
+    volumes:
+      - misp-data:/var/www/MISP
+    networks:
+      - soc-tier2-net
+    restart: unless-stopped
+
 networks:
   soc-tier2-net:
     driver: bridge
@@ -85,3 +137,6 @@ volumes:
   thehive-elasticsearch-data:
   cassandra-data:
   thehive-data:
+  misp-db-data:
+  misp-redis-data:
+  misp-data:
