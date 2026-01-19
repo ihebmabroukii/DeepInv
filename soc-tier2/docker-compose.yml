@@ -122,6 +122,8 @@ services:
       - ADMIN_EMAIL=admin@misp.local
       - ADMIN_PASSWORD=MispAdmin2026!
       - ADMIN_ORG=SOC-Tier2
+      - CRON_USER_ID=1
+      - CRON_USER_GID=1
     volumes:
       - misp-data:/var/www/MISP
     networks:
