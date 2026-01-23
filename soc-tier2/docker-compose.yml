@@ -77,59 +77,121 @@ services:
     restart: unless-stopped
     command: "--no-config-secret"
 
-  # MariaDB for MISP
-  misp-db:
-    image: mariadb:10.11
-    container_name: misp-db
+  # OpenCTI Stack
+  opencti-elasticsearch:
+    image: elasticsearch:7.17.15
+    volumes:
+      - opencti-elasticsearch-data:/usr/share/elasticsearch/data
     environment:
-      - MYSQL_ROOT_PASSWORD=MispRootPass2026!
-      - MYSQL_DATABASE=misp
-      - MYSQL_USER=misp
-      - MYSQL_PASSWORD=MispDbPass2026!
-    volumes:
-      - misp-db-data:/var/lib/mysql
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    restart: always
     networks:
       - soc-tier2-net
-    restart: unless-stopped
 
-  # Redis for MISP
-  misp-redis:
-    image: redis:7.2-alpine
-    container_name: misp-redis
-    volumes:
-      - misp-redis-data:/data
+  opencti-redis:
+    image: redis:7.2
+    restart: always
     networks:
       - soc-tier2-net
-    restart: unless-stopped
 
-  # MISP Platform
-  misp:
-    image: coolacid/misp-docker:core-latest
-    container_name: misp
-    depends_on:
-      - misp-db
-      - misp-redis
+  opencti-minio:
+    image: minio/minio:RELEASE.2023-09-30T07-02-29Z
+    volumes:
+      - opencti-minio-data:/data
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "9002:9000"
+      - "9003:9090"
     environment:
-      - MYSQL_HOST=misp-db
-      - MYSQL_DATABASE=misp
-      - MYSQL_USER=misp
-      - MYSQL_PASSWORD=MispDbPass2026!
-      - REDIS_FQDN=misp-redis
-      - MISP_BASEURL=http://localhost:8080
-      - TIMEZONE=Europe/Brussels
-      - ADMIN_EMAIL=admin@misp.local
-      - ADMIN_PASSWORD=MispAdmin2026!
-      - ADMIN_ORG=SOC-Tier2
-      - CRON_USER_ID=1
-      - CRON_USER_GID=1
-    volumes:
-      - misp-data:/var/www/MISP
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9090"
+    restart: always
     networks:
       - soc-tier2-net
-    restart: unless-stopped
+
+  opencti-rabbitmq:
+    image: rabbitmq:3.12-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti:
+    image: opencti/platform:5.12.9
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=3072
+      - APP__ADMIN__EMAIL=${OPENCTI_ADMIN_EMAIL}
+      - APP__ADMIN__PASSWORD=${OPENCTI_ADMIN_PASSWORD}
+      - APP__ADMIN__TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - APP__APP_LOGS__LOGS_LEVEL=error
+      - APP__BASE_URL=${OPENCTI_BASE_URL}
+      - APP__CORS__ALLOW_ORIGINS=*
+      - REDIS__HOSTNAME=opencti-redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://opencti-elasticsearch:9200
+      - MINIO__ENDPOINT=opencti-minio
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO__SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - RABBITMQ__HOSTNAME=opencti-rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__PORT_MANAGEMENT=15672
+      - RABBITMQ__MANAGEMENT_SSL=false
+      - RABBITMQ__USERNAME=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ__PASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - PROVIDERS__LOCAL__STRATEGY=LocalStrategy
+    ports:
+      - "8080:8080"
+    depends_on:
+      - opencti-redis
+      - opencti-rabbitmq
+      - opencti-elasticsearch
+      - opencti-minio
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-worker:
+    image: opencti/worker:5.12.9
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - WORKER_ID=${WORKER_ID}
+      - WORKER_LOG_LEVEL=error
+    depends_on:
+      - opencti
+    deploy:
+      mode: replicated
+      replicas: 1
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-thehive:
+    image: opencti/connector-thehive:5.12.9
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=f951b87c-a978-4eb8-97ba-514b85cad640
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=TheHive
+      - CONNECTOR_SCOPE=thehive
+      - CONNECTOR_CONFIDENCE_LEVEL=100
+      - CONNECTOR_UPDATE_EXISTING_DATA=false
+      - CONNECTOR_LOG_LEVEL=error
+      - THEHIVE_URL=http://thehive:9000
+      - THEHIVE_API_KEY=${THEHIVE_API_KEY}
+      - ORGANIZATION_NAME=SOC-Tier2
+    depends_on:
+      - opencti
+    restart: always
+    networks:
+      - soc-tier2-net
 
 networks:
   soc-tier2-net:
@@ -140,6 +202,5 @@ volumes:
   thehive-elasticsearch-data:
   cassandra-data:
   thehive-data:
-  misp-db-data:
-  misp-redis-data:
-  misp-data:
+  opencti-elasticsearch-data:
+  opencti-minio-data:
