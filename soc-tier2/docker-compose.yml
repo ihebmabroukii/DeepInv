@@ -79,13 +79,13 @@ services:
 
   # OpenCTI Stack
   opencti-elasticsearch:
-    image: elasticsearch:7.17.15
+    image: elasticsearch:8.12.0
     volumes:
       - opencti-elasticsearch-data:/usr/share/elasticsearch/data
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
     restart: always
     networks:
       - soc-tier2-net
@@ -121,13 +121,13 @@ services:
       - soc-tier2-net
 
   opencti:
-    image: opencti/platform:5.12.9
+    image: opencti/platform:latest
     environment:
-      - NODE_OPTIONS=--max-old-space-size=3072
+      - NODE_OPTIONS=--max-old-space-size=4096
       - APP__ADMIN__EMAIL=${OPENCTI_ADMIN_EMAIL}
       - APP__ADMIN__PASSWORD=${OPENCTI_ADMIN_PASSWORD}
       - APP__ADMIN__TOKEN=${OPENCTI_ADMIN_TOKEN}
-      - APP__APP_LOGS__LOGS_LEVEL=error
+      - APP__APP_LOGS__LOGS_LEVEL=info
       - APP__BASE_URL=${OPENCTI_BASE_URL}
       - APP__CORS__ALLOW_ORIGINS=*
       - REDIS__HOSTNAME=opencti-redis
@@ -157,7 +157,7 @@ services:
       - soc-tier2-net
 
   opencti-worker:
-    image: opencti/worker:5.12.9
+    image: opencti/worker:latest
     environment:
       - OPENCTI_URL=http://opencti:8080
       - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
@@ -173,7 +173,7 @@ services:
       - soc-tier2-net
 
   opencti-connector-thehive:
-    image: opencti/connector-thehive:5.12.9
+    image: opencti/connector-thehive:latest
     environment:
       - OPENCTI_URL=http://opencti:8080
       - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
