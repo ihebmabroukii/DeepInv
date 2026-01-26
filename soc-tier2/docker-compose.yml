@@ -129,6 +129,8 @@ services:
       - APP__ADMIN__TOKEN=${OPENCTI_ADMIN_TOKEN}
       - APP__APP_LOGS__LOGS_LEVEL=info
       - APP__BASE_URL=${OPENCTI_BASE_URL}
+      - APP__HOST=0.0.0.0
+      - APP__PORT=8080
       - APP__CORS__ALLOW_ORIGINS=*
       - REDIS__HOSTNAME=opencti-redis
       - REDIS__PORT=6379
@@ -146,7 +148,7 @@ services:
       - RABBITMQ__PASSWORD=${RABBITMQ_DEFAULT_PASS}
       - PROVIDERS__LOCAL__STRATEGY=LocalStrategy
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8888:8080"
     depends_on:
       - opencti-redis
       - opencti-rabbitmq
@@ -172,21 +174,69 @@ services:
     networks:
       - soc-tier2-net
 
-  opencti-connector-thehive:
-    image: opencti/connector-thehive:latest
+  opencti-connector-history:
+    image: opencti/connector-history:latest
     environment:
       - OPENCTI_URL=http://opencti:8080
       - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
-      - CONNECTOR_ID=f951b87c-a978-4eb8-97ba-514b85cad640
-      - CONNECTOR_TYPE=EXTERNAL_IMPORT
-      - CONNECTOR_NAME=TheHive
-      - CONNECTOR_SCOPE=thehive
+      - CONNECTOR_ID=${CONNECTOR_HISTORY_ID}
+      - CONNECTOR_TYPE=INTERNAL_ENRICHMENT
+      - CONNECTOR_NAME=History
+      - CONNECTOR_SCOPE=history
+      - CONNECTOR_AUTO=true
       - CONNECTOR_CONFIDENCE_LEVEL=100
-      - CONNECTOR_UPDATE_EXISTING_DATA=false
       - CONNECTOR_LOG_LEVEL=error
-      - THEHIVE_URL=http://thehive:9000
-      - THEHIVE_API_KEY=${THEHIVE_API_KEY}
-      - ORGANIZATION_NAME=SOC-Tier2
+    depends_on:
+      - opencti
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-export-file-stix:
+    image: opencti/connector-export-file-stix:latest
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${CONNECTOR_EXPORT_FILE_STIX_ID}
+      - CONNECTOR_TYPE=INTERNAL_EXPORT_FILE
+      - CONNECTOR_NAME=ExportFileStix2
+      - CONNECTOR_SCOPE=application/json
+      - CONNECTOR_CONFIDENCE_LEVEL=15
+      - CONNECTOR_LOG_LEVEL=error
+    depends_on:
+      - opencti
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-export-file-csv:
+    image: opencti/connector-export-file-csv:latest
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${CONNECTOR_EXPORT_FILE_CSV_ID}
+      - CONNECTOR_TYPE=INTERNAL_EXPORT_FILE
+      - CONNECTOR_NAME=ExportFileCsv
+      - CONNECTOR_SCOPE=text/csv
+      - CONNECTOR_CONFIDENCE_LEVEL=15
+      - CONNECTOR_LOG_LEVEL=error
+    depends_on:
+      - opencti
+    restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-export-file-txt:
+    image: opencti/connector-export-file-txt:latest
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${CONNECTOR_EXPORT_FILE_TXT_ID}
+      - CONNECTOR_TYPE=INTERNAL_EXPORT_FILE
+      - CONNECTOR_NAME=ExportFileTxt
+      - CONNECTOR_SCOPE=text/plain
+      - CONNECTOR_CONFIDENCE_LEVEL=15
+      - CONNECTOR_LOG_LEVEL=error
     depends_on:
       - opencti
     restart: always
