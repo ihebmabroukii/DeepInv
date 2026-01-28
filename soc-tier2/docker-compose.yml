@@ -53,7 +53,7 @@ services:
     volumes:
       - ./application.conf:/etc/cortex/application.conf
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./analyzers:/opt/cortex/analyzers
+      - /tmp/cortex-jobs:/tmp/cortex-jobs
     networks:
       - soc-tier2-net
     restart: unless-stopped
@@ -122,6 +122,7 @@ services:
 
   opencti:
     image: opencti/platform:latest
+    container_name: opencti
     environment:
       - NODE_OPTIONS=--max-old-space-size=4096
       - APP__ADMIN__EMAIL=${OPENCTI_ADMIN_EMAIL}
@@ -240,6 +241,47 @@ services:
     depends_on:
       - opencti
     restart: always
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-mitre:
+    image: opencti/connector-mitre:latest
+    container_name: opencti-connector-mitre
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${CONNECTOR_MITRE_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=MITRE ATT&CK
+      - CONNECTOR_SCOPE=identity,attack-pattern,course-of-action,intrusion-set,malware,tool,report
+      - CONNECTOR_CONFIDENCE_LEVEL=75
+      - CONNECTOR_UPDATE_EXISTING_DATA=false
+      - CONNECTOR_LOG_LEVEL=error
+    restart: always
+    depends_on:
+      - opencti
+    networks:
+      - soc-tier2-net
+
+  opencti-connector-thehive:
+    image: opencti/connector-thehive:latest
+    container_name: opencti-connector-thehive
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN}
+      - CONNECTOR_ID=${CONNECTOR_THEHIVE_ID}
+      - CONNECTOR_TYPE=EXTERNAL_IMPORT
+      - CONNECTOR_NAME=TheHive
+      - CONNECTOR_SCOPE=thehive
+      - CONNECTOR_CONFIDENCE_LEVEL=15
+      - CONNECTOR_UPDATE_EXISTING_DATA=false
+      - CONNECTOR_LOG_LEVEL=error
+      - THEHIVE_URL=http://thehive:9000
+      - THEHIVE_API_KEY=${THEHIVE_API_KEY}
+    restart: always
+    depends_on:
+      - opencti
+      - thehive
     networks:
       - soc-tier2-net
 

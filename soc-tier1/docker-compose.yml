@@ -70,7 +70,7 @@ services:
     container_name: wazuh.manager
     hostname: wazuh.manager
     ports:
-      - "1514:1514/udp"
+      - "1514:1514"
       - "1515:1515"
       # - "55555:55000"
     environment:
@@ -90,10 +90,12 @@ services:
       - suricata-logs:/var/log/suricata
       - ./wazuh-manager/config/filebeat.yml:/etc/filebeat/filebeat.yml
       - ./wazuh-manager/config/ossec.conf:/var/ossec/etc/ossec.conf
+      - ./wazuh-manager/integrations/custom-thehive:/var/ossec/integrations/custom-thehive
     depends_on:
       - elasticsearch
     networks:
       - wazuh-network
+      - soc-tier2_net
 
   suricata:
     image: jasonish/suricata:latest
@@ -169,3 +171,6 @@ volumes:
 networks:
   wazuh-network:
     driver: bridge
+  soc-tier2_net:
+    external: true
+    name: soc-tier2_soc-tier2-net

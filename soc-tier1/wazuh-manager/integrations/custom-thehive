@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+import sys
+import os
+import json
+import time
+import urllib.request
+import urllib.error
+import urllib.parse
+import ssl
+
+# Reading setup parameters
+debug_enabled = True
+# Set specific alert levels to send to TheHive
+# 0 = All alerts
+lvl_threshold = 0
+
+def log_debug(msg):
+    if debug_enabled:
+        with open('/var/ossec/logs/integrations.log', 'a') as f:
+            f.write(str(time.time()) + " - TheHive: " + msg + "\n")
+
+def create_alert(alert_file):
+    try:
+        with open(alert_file) as f:
+            alert_json = json.load(f)
+    except Exception as e:
+        log_debug(f"Error reading alert file: {e}")
+        return
+
+    # Check alert level
+    if int(alert_json.get('rule', {}).get('level', 0)) < lvl_threshold:
+        return
+
+    if len(sys.argv) < 4:
+        log_debug("Missing arguments")
+        return
+
+    thehive_url = sys.argv[3]
+    thehive_apikey = sys.argv[2]
+
+    # Clean URL
+    if not thehive_url.endswith('/'):
+        thehive_url += '/'
+
+    # Map Wazuh level to TheHive severity
+    wazuh_level = int(alert_json.get('rule', {}).get('level', 0))
+    severity = 1
+    if wazuh_level >= 12:
+        severity = 3 # High
+    elif wazuh_level >= 7:
+        severity = 2 # Medium
+    elif wazuh_level >= 4:
+        severity = 1 # Low
+
+    # Prepare Alert Data
+    description = alert_json.get('rule', {}).get('description', 'No description')
+    source = "Wazuh"
+    title = f"Wazuh Alert: {description}"
+    
+    # Artifacts (Observables)
+    observables = []
+    agent_name = alert_json.get('agent', {}).get('name', 'N/A')
+    agent_ip = alert_json.get('agent', {}).get('ip', 'N/A')
+    
+    if agent_ip != 'N/A':
+        observables.append({'dataType': 'ip', 'data': agent_ip, 'message': 'Agent IP'})
+    
+    if 'srcip' in alert_json.get('data', {}):
+        observables.append({'dataType': 'ip', 'data': alert_json['data']['srcip'], 'message': 'Source IP'})
+    if 'dstip' in alert_json.get('data', {}):
+        observables.append({'dataType': 'ip', 'data': alert_json['data']['dstip'], 'message': 'Destination IP'})
+
+    # Payload
+    alert_payload = {
+        'title': title,
+        'description': f"{description}\n\nRunning on agent: {agent_name} ({agent_ip})\nRule ID: {alert_json.get('rule', {}).get('id')}",
+        'severity': severity,
+        'date': int(time.time() * 1000), 
+        'source': source,
+        'sourceRef': f"wazuh-{alert_json.get('id')}", 
+        'tlp': 2, 
+        'observables': observables,
+        'type': 'external',
+        'status': 'New'
+    }
+
+    # Send to TheHive using urllib
+    headers = {
+        'Authorization': f"Bearer {thehive_apikey}",
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        req_url = f"{thehive_url}api/v1/alert"
+        data = json.dumps(alert_payload).encode('utf-8')
+        
+        # Bypass SSL verification if needed (for internal docker nets usually fine, but good practice for trusted self-signed)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(req_url, data=data, headers=headers)
+        
+        with urllib.request.urlopen(req, context=ctx) as response:
+            log_debug(f"Response: {response.read().decode('utf-8')}")
+            
+    except urllib.error.HTTPError as e:
+        log_debug(f"HTTP Error: {e.code} - {e.read().decode('utf-8')}")
+    except Exception as e:
+        log_debug(f"Request failed: {e}")
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2:
+        create_alert(sys.argv[1])
