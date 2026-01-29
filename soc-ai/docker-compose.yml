@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  soc-ai:
+    build: .
+    container_name: soc-ai
+    user: "0:0"
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - WAZUH_API_URL=https://wazuh.manager:55000
+      - WAZUH_API_USER=wazuh
+      - WAZUH_API_PASSWORD=wazuh
+      - SURICATA_LOG_PATH=/var/log/suricata/eve.json
+      - THEHIVE_URL=http://thehive:9000
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - AI_MODEL_NAME=mistral
+    volumes:
+      - soc-tier1_suricata-logs:/var/log/suricata:ro
+      - soc-tier1_wazuh-logs:/var/ossec/logs:ro
+      - ./logs:/app/logs
+    networks:
+      - soc_net
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    networks:
+      - soc_net
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+# Connect to the existing network defined in Tier 1 / Tier 2
+networks:
+  soc_net:
+    external: true
+    name: soc-tier2_soc-tier2-net
+
+volumes:
+  soc-tier1_suricata-logs:
+    external: true
+  soc-tier1_wazuh-logs:
+    external: true
+  ollama_data:

@@ -44,7 +44,7 @@ services:
 
   # Cortex (existing, updated network)
   cortex:
-    image: thehiveproject/cortex:3.1.7
+    image: thehiveproject/cortex:3.2.1-1
     container_name: cortex
     depends_on:
       - cortex-elasticsearch

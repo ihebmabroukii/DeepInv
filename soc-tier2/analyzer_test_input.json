@@ -1,0 +1,23 @@
+{
+    "config": {
+        "name": [
+            "opencti"
+        ],
+        "url": [
+            "http://opencti:8080"
+        ],
+        "key": [
+            "REDACTED"
+        ],
+        "max_tlp": 2,
+        "max_pap": 2,
+        "auto_extract_artifacts": true,
+        "check_tlp": true,
+        "check_pap": true,
+        "cert_check": false
+    },
+    "data": "8.8.8.8",
+    "dataType": "ip",
+    "tlp": 2,
+    "pap": 2
+}
