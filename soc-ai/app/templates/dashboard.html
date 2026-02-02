@@ -72,6 +72,17 @@
                 <h2 class="text-xl font-semibold text-slate-200">Live Incidents</h2>
                 <span id="incident-count" class="text-xs bg-soc-card px-2 py-1 rounded text-slate-400">0 Active</span>
             </div>
+            <!-- Search Bar -->
+            <div class="relative">
+                <input type="text" id="incident-search" oninput="renderFeed()"
+                    placeholder="Search IP, Tactic, or Narrative..."
+                    class="w-full bg-soc-card text-sm text-slate-200 rounded-lg px-4 py-2 border border-white/5 focus:border-soc-accent focus:outline-none transition placeholder-slate-600">
+                <svg class="w-4 h-4 absolute right-3 top-2.5 text-slate-500" fill="none" stroke="currentColor"
+                    viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+            </div>
             <div id="incident-feed" class="space-y-4 overflow-y-auto max-h-[80vh] pr-2">
                 <!-- Incidents will be injected here -->
                 <div class="glass p-4 rounded-xl animate-pulse">
@@ -253,7 +264,17 @@
 
         function renderFeed() {
             const container = document.getElementById('incident-feed');
-            const incidents = Object.values(incidentsMap);
+            let incidents = Object.values(incidentsMap);
+
+            // Filter
+            const query = (document.getElementById('incident-search')?.value || '').toLowerCase();
+            if (query) {
+                incidents = incidents.filter(inc =>
+                    (inc.source_ip || '').toLowerCase().includes(query) ||
+                    (inc.mitre_tactic || '').toLowerCase().includes(query) ||
+                    (inc.narrative || '').toLowerCase().includes(query)
+                );
+            }
 
             // Sort by Risk (Desc) -> Time (Desc)
             incidents.sort((a, b) => {

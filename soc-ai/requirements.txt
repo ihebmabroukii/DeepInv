@@ -9,6 +9,7 @@ aiohttp>=3.9.0
 websockets
 python-dotenv>=1.0.1
 redis>=5.0.1
+elasticsearch
 # AI / LangChain
 langchain>=0.1.0
 langchain-community>=0.0.10 # Required for Ollama

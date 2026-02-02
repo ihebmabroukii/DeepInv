@@ -22,6 +22,7 @@ services:
       - "9200:9200"
     networks:
       - wazuh-network
+      - soc-tier2_net
 
   kibana:
     image: docker.elastic.co/kibana/kibana:${KIBANA_VERSION}

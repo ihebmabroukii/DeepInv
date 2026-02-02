@@ -3,6 +3,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from app.core.config import settings
 from app.schemas.alert import NormalizedAlert, Incident
+from app.services.threat_intel import threat_intel
+from app.services.behavior import behavior_analyzer
+import re
+import asyncio
+import json
 from loguru import logger
 
 class LLMEngine:
@@ -11,7 +16,7 @@ class LLMEngine:
         self.llm = ChatOllama(
             base_url=settings.OLLAMA_BASE_URL,
             model=settings.AI_MODEL_NAME,
-            temperature=0.1,
+            temperature=0,
             format="json"
         )
         # JSON Output Parser
@@ -24,27 +29,41 @@ class LLMEngine:
             
             Valid MITRE Tactics: [Initial Access, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Exfiltration, Impact]
             
+            CRITICAL INSTRUCTIONS:
+            1. If THREAT INTEL finds a match, mention the 'Source' and 'Description' in your narrative.
+            2. If BEHAVIORAL ANALYSIS (UEBA) says "Anomaly" or "No history", this is a HIGH RISK indicator. You MUST mention "UEBA Anomaly Detected" in the narrative.
+            3. If the user is 'admin' and the IP is new, assume account compromise unless proven otherwise.
+            
             OUTPUT JSON ONLY:
             {{
-                "narrative": "Concise story of what happened.",
+                "narrative": "Concise story. START with the most critical finding (Intel or UEBA).",
                 "risk_score": 0-100,
                 "status": "investigating" or "closed" or "escalated",
                 "mitre_tactic": "Select ONE from valid list above",
                 "attack_stage": "Reconnaissance" or "Exploitation" or "Actions on Objectives",
-                "threat_intel_indicators": ["List", "Specific", "Indicators", "From", "Intel", "Report"]
+                "threat_intel_indicators": ["List", "Specific", "Indicators", "From", "Intel", "Report"],
+                "ueba_indicators": ["List", "Specific", "Indicators", "From", "Behavioral", "Analysis"]
             }}
             NO EXTRA TEXT.
             """),
             ("user", """
-            THREAT INTELLIGENCE:
-            {intel_context}
-
-            PRIOR CONTEXT: {previous_context}
+            ## INCIDENT DATA
+            Source IP: {source_ip}
+            Alerts: {alert_count}
             
-            ALERTS ({alert_count}):
+            ## THREAT INTELLIGENCE (External Context)
+            {intel_context}
+            
+            ## BEHAVIORAL ANALYSIS (Internal Context)
+            {behavior_context}
+            
+            ## PREVIOUS CONTEXT
+            {previous_context}
+            
+            ## RAW ALERTS (Truncated)
             {alerts_json}
             
-            Question: Has the situation escalated? what is the Tactic?
+            Question: Has the situation escalated? what is the Tactic? Is this behavior normal for the user?
             JSON Report:
             """)
         ])
@@ -81,23 +100,35 @@ class LLMEngine:
             # Format Intel String
             intel_str = intel_context if intel_context else "No Threat Intelligence found for this IP."
 
-            import asyncio
+            # 2. Behavioral Analysis (UEBA)
+            behavior_report = "No User Context found in alerts."
+            target_user = None
+            # Scan alerts for username
+            for alert in incident.alerts:
+                 # "Failed password for invalid user admin from..." or "user=admin"
+                 # Simple regex for "user <name>" or "user=name"
+                 match = re.search(r"user\s+(\w+)|user=(\w+)", alert.name + " " + alert.description, re.IGNORECASE)
+                 if match:
+                     target_user = match.group(1) or match.group(2)
+                     break
+            
+            if target_user:
+                behavior_report = await behavior_analyzer.get_user_login_history(target_user)
+
             response_str = await asyncio.wait_for(
                 self.chain.ainvoke({
                     "source_ip": incident.source_ip,
                     "alert_count": len(incident.alerts),
                     "alerts_json": "\n".join(alerts_summary),
                     "previous_context": context_str,
-                    "intel_context": intel_str
+                    "intel_context": intel_str,
+                    "behavior_context": behavior_report
                 }),
                 timeout=160.0
             )
             
             logger.info(f"Raw LLM Response: {response_str}")
             
-            # Parse JSON response
-            import json
-            import re
             
             # Extract JSON from potential markdown or text
             match = re.search(r"\{.*\}", response_str, re.DOTALL)
