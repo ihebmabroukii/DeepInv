@@ -131,10 +131,17 @@ class LLMEngine:
             
             
             # Extract JSON from potential markdown or text
-            match = re.search(r"\{.*\}", response_str, re.DOTALL)
+            # Extract JSON from potential markdown or text
+            # Non-greedy match for the first JSON object
+            match = re.search(r"\{[\s\S]*?\}", response_str)
             if match:
-                clean_json = match.group(0)
-                data = json.loads(clean_json)
+                try:
+                    clean_json = match.group(0)
+                    data = json.loads(clean_json)
+                except json.JSONDecodeError:
+                    logger.warning("Regex found JSON-like block but decode failed. Trying robust cleanup.")
+                    # Fallback: simple text extraction if JSON fails
+                    data = {"narrative": response_str[:200], "status": "investigating"}
             else:
                 layout = response_str[:200]
                 logger.warning(f"Failed to find JSON in: {layout}...")

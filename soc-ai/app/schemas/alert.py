@@ -51,7 +51,7 @@ class NormalizedAlert(BaseModel):
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
     
-    raw_data: Dict[str, Any] = Field(default_factory=dict, exclude=True) # exclude from API responses by default
+    raw_data: Dict[str, Any] = Field(default_factory=dict) # Included for Dashboard visibility
 
 class Incident(BaseModel):
     """

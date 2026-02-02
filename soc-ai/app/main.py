@@ -11,15 +11,26 @@ logger.add("logs/soc-ai.log", rotation="500 MB", level="INFO")
 async def lifespan(app: FastAPI):
     logger.info("Starting AI-Driven SOC Analyst System...")
     
-    # Start Ingestion Service
-    from app.services.ingestor import ingestor
-    await ingestor.start()
-    
+    try:
+        # Start Ingestion Service
+        logger.info("Importing IngestionService...")
+        from app.services.ingestor import ingestor
+        logger.info("Starting IngestionService...")
+        await ingestor.start()
+        logger.info("IngestionService Started Successfully.")
+    except Exception as e:
+        logger.critical(f"Startup Failed: {e}")
+        # Don't re-raise, let the app start so we can see health check failure
+        
     yield
     
     # Shutdown
     logger.info("Shutting down SOC AI System...")
-    await ingestor.stop()
+    try:
+        if 'ingestor' in locals():
+            await ingestor.stop()
+    except Exception as e:
+        logger.error(f"Shutdown Error: {e}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME, 
@@ -60,7 +71,8 @@ templates = Jinja2Templates(directory="app/templates")
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    logger.info("Serving Dashboard V2 (Cache Buster)")
+    return templates.TemplateResponse("dashboard_v2.html", {"request": request})
 
 @app.get("/health")
 async def health_check():
