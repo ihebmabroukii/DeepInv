@@ -16,11 +16,13 @@ class Settings(BaseSettings):
     SURICATA_LOG_PATH: str = "/var/log/suricata/eve.json" # If using volume mount
     # Or URL if using a forwarder
     
-    THEHIVE_URL: str = "http://thehive:9000"
-    THEHIVE_API_KEY: Optional[str] = None
+    THEHIVE_URL: str = "http://host.docker.internal:9000"
+    THEHIVE_API_KEY: Optional[str] = "REDACTED"
     
-    OPENCTI_URL: str = "http://opencti:8080"
-    OPENCTI_TOKEN: Optional[str] = None
+    # OpenCTI (Tier 2)
+    # Accessed via Docker Network 'soc-tier2_soc-tier2-net'
+    OPENCTI_URL: str = "http://opencti:8080" 
+    OPENCTI_TOKEN: str = "REDACTED"
     
     # AI Configuration (Ollama)
     OLLAMA_BASE_URL: str = "http://ollama:11434"
@@ -28,6 +30,9 @@ class Settings(BaseSettings):
 
     # Redis (For Correlation/State)
     REDIS_URL: str = "redis://redis:6379/0"
+
+    # Noise Reduction
+    IGNORED_IPS: List[str] = ["192.168.65.1", "192.168.65.7"] # Internal Docker Traffic
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
 

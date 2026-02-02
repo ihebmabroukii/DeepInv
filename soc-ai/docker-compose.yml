@@ -17,6 +17,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - OLLAMA_BASE_URL=http://ollama:11434
       - AI_MODEL_NAME=mistral
+      # Dynamic Hostname (DNS Verified)
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=REDACTED
     volumes:
       - soc-tier1_suricata-logs:/var/log/suricata:ro
       - soc-tier1_wazuh-logs:/var/ossec/logs:ro
@@ -33,6 +36,15 @@ services:
       - soc_net
     volumes:
       - ollama_data:/root/.ollama
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: soc-ai-redis
+    networks:
+      - soc_net
+    ports:
+      - "6379:6379"
     restart: always
 
 # Connect to the existing network defined in Tier 1 / Tier 2

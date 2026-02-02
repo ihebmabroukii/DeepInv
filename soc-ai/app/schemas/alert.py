@@ -52,3 +52,22 @@ class NormalizedAlert(BaseModel):
     mitre_technique_name: Optional[str] = None
     
     raw_data: Dict[str, Any] = Field(default_factory=dict, exclude=True) # exclude from API responses by default
+
+class Incident(BaseModel):
+    """
+    Represents a group of alerts aggregated by Source IP.
+    This is the unit of work for the AI Analyst.
+    """
+    id: str = Field(..., description="Unique Incident ID")
+    source_ip: str
+    alerts: List[NormalizedAlert]
+    created_at: datetime
+    
+    # AI Analysis Results
+    status: str = "pending" # pending, analyzing, completed
+    risk_score: int = 0
+    narrative: str = ""
+    mitre_tactic: str = ""
+    attack_stage: str = ""
+    threat_intel_indicators: List[str] = []
+

@@ -2,7 +2,7 @@ from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from app.core.config import settings
-from app.schemas.alert import NormalizedAlert
+from app.schemas.alert import NormalizedAlert, Incident
 from loguru import logger
 
 class LLMEngine:
@@ -11,53 +11,121 @@ class LLMEngine:
         self.llm = ChatOllama(
             base_url=settings.OLLAMA_BASE_URL,
             model=settings.AI_MODEL_NAME,
-            temperature=0.1
+            temperature=0.1,
+            format="json"
         )
+        # JSON Output Parser
         self.parser = StrOutputParser()
         
-        # Define the Analyst Persona Prompt
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert Tier-2 SOC Analyst. Your job is to explain security alerts clearly to non-experts.
+        # Define the Chain-of-Thought Analyst Persona (SIMPLIFIED FOR SPEED)
+        self.incident_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a SOC Analyst.
+            Analyze the following alerts and prior context.
             
-            RULES:
-            1. Be concise and professional.
-            2. Start with the most critical information.
-            3. Explain WHAT happened, WHO was involved (IPs/Users), and WHY it matters.
-            4. Do not output JSON, just plain text or markdown.
-            5. If the severity is CRITICAL, emphasize the immediate risk.
+            Valid MITRE Tactics: [Initial Access, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Exfiltration, Impact]
+            
+            OUTPUT JSON ONLY:
+            {{
+                "narrative": "Concise story of what happened.",
+                "risk_score": 0-100,
+                "status": "investigating" or "closed" or "escalated",
+                "mitre_tactic": "Select ONE from valid list above",
+                "attack_stage": "Reconnaissance" or "Exploitation" or "Actions on Objectives",
+                "threat_intel_indicators": ["List", "Specific", "Indicators", "From", "Intel", "Report"]
+            }}
+            NO EXTRA TEXT.
             """),
-            ("user", """Analyze the following security alert:
+            ("user", """
+            THREAT INTELLIGENCE:
+            {intel_context}
+
+            PRIOR CONTEXT: {previous_context}
             
-            Name: {alert_name}
-            Severity: {severity}
-            Source: {source}
-            Description: {description}
-            Source IP: {src_ip}
-            Destination IP: {dst_ip}
+            ALERTS ({alert_count}):
+            {alerts_json}
             
-            Write a 2-sentence summary of this event for the executive dashboard:
+            Question: Has the situation escalated? what is the Tactic?
+            JSON Report:
             """)
         ])
         
-        self.chain = self.prompt | self.llm | self.parser
+        self.chain = self.incident_prompt | self.llm | self.parser
 
-    async def analyze(self, alert: NormalizedAlert) -> str:
+    async def analyze_incident(self, incident: Incident, previous_context: dict = None, intel_context: str = None) -> Incident:
         """
-        Generates a human-readable explanation for the alert.
+        Analyzes an aggregated incident using Chain-of-Thought.
         """
         try:
-            logger.info(f"Generating AI explanation for alert: {alert.name}")
-            response = await self.chain.ainvoke({
-                "alert_name": alert.name,
-                "severity": alert.severity.value,
-                "source": alert.source_system,
-                "description": alert.description or "No description provided",
-                "src_ip": alert.src_ip or "Unknown",
-                "dst_ip": alert.dst_ip or "Unknown"
-            })
-            return response
+            logger.info(f"Analyzing Incident {incident.id} from {incident.source_ip}")
+            
+            # Prepare alerts summary for AI
+            # Limit to 10 alerts to ensure speed
+            max_alerts = 10
+            alerts_to_show = incident.alerts[:max_alerts]
+            
+            alerts_summary = [
+                f"- {a.timestamp}: {a.name} ({a.severity.value})" 
+                for a in alerts_to_show
+            ]
+            
+            if len(incident.alerts) > max_alerts:
+                alerts_summary.append(f"... +{len(incident.alerts) - max_alerts} more.")
+            
+            # Format Context String
+            context_str = "None"
+            if previous_context:
+                context_str = (
+                    f"Prior Incident: {previous_context.get('narrative')[:200]}"
+                )
+            
+            # Format Intel String
+            intel_str = intel_context if intel_context else "No Threat Intelligence found for this IP."
+
+            import asyncio
+            response_str = await asyncio.wait_for(
+                self.chain.ainvoke({
+                    "source_ip": incident.source_ip,
+                    "alert_count": len(incident.alerts),
+                    "alerts_json": "\n".join(alerts_summary),
+                    "previous_context": context_str,
+                    "intel_context": intel_str
+                }),
+                timeout=160.0
+            )
+            
+            logger.info(f"Raw LLM Response: {response_str}")
+            
+            # Parse JSON response
+            import json
+            import re
+            
+            # Extract JSON from potential markdown or text
+            match = re.search(r"\{.*\}", response_str, re.DOTALL)
+            if match:
+                clean_json = match.group(0)
+                data = json.loads(clean_json)
+            else:
+                layout = response_str[:200]
+                logger.warning(f"Failed to find JSON in: {layout}...")
+                data = {} 
+            
+            # Update Incident
+            incident.narrative = data.get("narrative", "Analysis failed to produce narrative.")
+            incident.risk_score = data.get("risk_score", 0)
+            incident.status = data.get("status", "analyzed")
+            incident.mitre_tactic = data.get("mitre_tactic", "Unknown")
+            incident.attack_stage = data.get("attack_stage", "Unknown")
+            incident.threat_intel_indicators = data.get("threat_intel_indicators", [])
+            
+            return incident
+            
+        except asyncio.TimeoutError:
+            logger.error(f"Incident Analysis Timed Out (Source: {incident.source_ip})")
+            incident.narrative = "AI Analysis Timed Out. System under load."
+            return incident
         except Exception as e:
-            logger.error(f"AI Analysis failed: {e}")
-            return "AI Analysis Failed (Ollama might be unreachable or loading model)"
+            logger.error(f"Incident Analysis failed: {e}")
+            incident.narrative = f"AI Analysis Failed: {str(e)}"
+            return incident
 
 llm_engine = LLMEngine()

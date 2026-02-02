@@ -50,6 +50,34 @@ async def root():
         "docs": "/docs"
     }
 
+
+# Serve Dashboard
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+templates = Jinja2Templates(directory="app/templates")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def read_dashboard(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Real-time WebSocket
+from app.api.ws import manager
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text() # Keep connection alive, listen for ping
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket Error: {e}")
+        manager.disconnect(websocket)

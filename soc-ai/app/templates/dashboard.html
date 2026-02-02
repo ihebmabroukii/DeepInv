@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOC-AI 3.0 Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        soc: {
+                            bg: '#0f172a',
+                            card: '#1e293b',
+                            accent: '#3b82f6',
+                            danger: '#ef4444',
+                            warning: '#f59e0b',
+                            success: '#10b981'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glass {
+                @apply bg-soc-card/80 backdrop-blur-md border border-white/5 shadow-xl;
+            }
+        }
+        body {
+            @apply bg-soc-bg text-slate-100 font-sans antialiased;
+        }
+        #network-graph {
+            height: 300px;
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-6">
+    <!-- Header -->
+    <header class="flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                SOC-AI 3.0 <span class="text-sm font-mono text-slate-400">| Intelligent Command Center</span>
+            </h1>
+            <p class="text-slate-400 text-sm mt-1">Real-time Analysis • OpenCTI Intel • Threat Topology</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <div id="connection-status" class="flex items-center gap-2">
+                <span class="relative flex h-3 w-3">
+                    <span id="ping-indicator"
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span class="text-sm font-mono text-green-400">LIVE SOCKET</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left: Incident Feed -->
+        <div class="lg:col-span-1 space-y-4">
+            <div class="flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-slate-200">Live Incidents</h2>
+                <span id="incident-count" class="text-xs bg-soc-card px-2 py-1 rounded text-slate-400">0 Active</span>
+            </div>
+            <div id="incident-feed" class="space-y-4 overflow-y-auto max-h-[80vh] pr-2">
+                <!-- Incidents will be injected here -->
+                <div class="glass p-4 rounded-xl animate-pulse">
+                    <p class="text-slate-500 text-center">Waiting for Intelligence...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Active Investigation & Topology -->
+        <div class="lg:col-span-2 space-y-6">
+
+            <!-- Topology Map -->
+            <div class="glass p-4 rounded-xl border border-white/10">
+                <h3 class="text-slate-400 text-sm uppercase mb-2">Threat Topology Map</h3>
+                <div id="network-graph" class="rounded-lg bg-black/40"></div>
+            </div>
+
+            <div class="glass p-8 rounded-2xl border-l-4 border-soc-accent relative overflow-hidden">
+                <div class="absolute top-0 right-0 p-4 opacity-10">
+                    <svg class="w-24 h-24" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+                    </svg>
+                </div>
+
+                <div class="mb-6">
+                    <span class="text-xs font-mono uppercase tracking-widest text-soc-accent mb-2 block">Active Threat
+                        Narrative</span>
+                    <h2 id="main-title" class="text-2xl font-bold text-white">No Active Threats Selected</h2>
+                </div>
+
+                <!-- Threat Artifacts (Hidden by default) -->
+                <div id="intel-section" class="mb-6 hidden">
+                    <h3 class="text-soc-danger text-xs uppercase mb-2 font-bold flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                            </path>
+                        </svg>
+                        Identified Threat Artifacts
+                    </h3>
+                    <div id="main-artifacts" class="flex flex-wrap gap-2">
+                        <!-- Badges injected here -->
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-black/20 p-4 rounded-lg">
+                        <span class="text-slate-400 text-xs uppercase">Risk Score</span>
+                        <div class="text-3xl font-mono font-bold text-soc-danger" id="main-risk">--/100</div>
+                    </div>
+                    <div class="bg-black/20 p-4 rounded-lg">
+                        <span class="text-slate-400 text-xs uppercase">Attack Stage</span>
+                        <div class="text-xl font-bold text-white" id="main-stage">--</div>
+                    </div>
+                </div>
+
+                <div class="prose prose-invert max-w-none">
+                    <p id="main-narrative" class="text-lg leading-relaxed text-slate-300">
+                        Select an incident from the feed to view the AI's full Chain-of-Thought analysis.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Technical Details -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="glass p-6 rounded-xl">
+                    <h3 class="text-slate-400 text-sm uppercase mb-2">MITRE Tactic</h3>
+                    <div id="main-mitre" class="text-lg font-mono text-soc-warning">--</div>
+                </div>
+                <div class="glass p-6 rounded-xl">
+                    <h3 class="text-slate-400 text-sm uppercase mb-2">Source IP</h3>
+                    <div id="main-ip" class="text-lg font-mono text-gray-300">--</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let incidentsMap = {};
+        let socket;
+        let network;
+        let nodes, edges;
+
+        function initGraph() {
+            nodes = new vis.DataSet([
+                { id: 'local', label: 'DeepInv Network', color: '#3b82f6', shape: 'hexagon', size: 30 }
+            ]);
+            edges = new vis.DataSet([]);
+
+            const container = document.getElementById('network-graph');
+            const data = { nodes: nodes, edges: edges };
+            const options = {
+                nodes: {
+                    font: { color: '#ffffff' }
+                },
+                physics: {
+                    stabilization: false,
+                    barnesHut: { gravitationalConstant: -2000, springConstant: 0.04 }
+                }
+            };
+            network = new vis.Network(container, data, options);
+        }
+
+        function updateGraph(incident) {
+            // Add Attacker Node
+            if (!nodes.get(incident.source_ip)) {
+                nodes.add({
+                    id: incident.source_ip,
+                    label: incident.source_ip + '\n(' + incident.mitre_tactic + ')',
+                    color: incident.risk_score > 80 ? '#ef4444' : '#f59e0b',
+                    shape: 'dot'
+                });
+
+                // Link to Local Network
+                edges.add({
+                    from: incident.source_ip,
+                    to: 'local',
+                    arrows: 'to',
+                    color: { color: '#ef4444', highlight: '#ef4444' },
+                    label: incident.mitre_tactic
+                });
+            }
+        }
+
+        function connectWebSocket() {
+            const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${proto}://${window.location.host}/ws`;
+            console.log("Connecting to WebSocket:", wsUrl);
+
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function (e) {
+                console.log("WebSocket connected");
+            };
+
+            socket.onmessage = function (event) {
+                const incident = JSON.parse(event.data);
+                console.log("New Incident:", incident);
+
+                // Add/Update Map
+                incidentsMap[incident.id] = incident;
+
+                // Refresh Feed
+                renderFeed();
+
+                // Update Graph
+                updateGraph(incident);
+
+                // Auto-select if high risk? No, user choice.
+                // But we can flash a notification.
+            };
+
+            socket.onclose = function (event) {
+                console.log("WebSocket closed. Reconnecting...");
+                setTimeout(connectWebSocket, 1000);
+            };
+
+            socket.onerror = function (error) {
+                console.log("WebSocket Error:", error);
+            };
+        }
+
+        async function fetchInitialIncidents() {
+            try {
+                const response = await fetch('/api/v1/alerts/incidents');
+                const incidents = await response.json();
+
+                // Populate Map
+                incidents.forEach(inc => {
+                    incidentsMap[inc.id] = inc;
+                    updateGraph(inc);
+                });
+                renderFeed();
+            } catch (e) {
+                console.log("Initial fetch error:", e);
+            }
+        }
+
+        function renderFeed() {
+            const container = document.getElementById('incident-feed');
+            const incidents = Object.values(incidentsMap);
+
+            // Sort by Risk (Desc) -> Time (Desc)
+            incidents.sort((a, b) => {
+                if (b.risk_score !== a.risk_score) return b.risk_score - a.risk_score;
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+
+            document.getElementById('incident-count').innerText = `${incidents.length} Active`;
+
+            container.innerHTML = incidents.map(inc => `
+                <div onclick="selectIncident('${inc.id}')" 
+                     class="glass p-4 rounded-xl cursor-pointer hover:bg-white/5 transition border-l-4 ${getRiskColor(inc.risk_score)} mb-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="font-mono text-xs text-slate-400">${new Date(inc.created_at).toLocaleTimeString()}</span>
+                        <span class="text-xs font-bold px-2 py-0.5 rounded bg-black/30 text-white">${inc.risk_score}% RISK</span>
+                    </div>
+                    <h3 class="font-bold text-sm text-white mb-1">${inc.mitre_tactic || 'Unknown Tactic'}</h3>
+                    <p class="text-xs text-slate-400 line-clamp-2">${(inc.narrative || '').replace(/"/g, '&quot;')}</p>
+                </div>
+            `).join('');
+        }
+
+        function selectIncident(id) {
+            const inc = incidentsMap[id];
+            if (!inc) return;
+
+            document.getElementById('main-title').innerText = `Incident: ${inc.source_ip}`;
+            document.getElementById('main-risk').innerText = `${inc.risk_score}/100`;
+            document.getElementById('main-risk').className = `text-3xl font-mono font-bold ${getRiskScoreColor(inc.risk_score)}`;
+
+            document.getElementById('main-stage').innerText = inc.attack_stage || 'Unknown';
+            document.getElementById('main-narrative').innerText = inc.narrative || 'No details available.';
+            document.getElementById('main-mitre').innerText = inc.mitre_tactic || 'Unknown';
+            document.getElementById('main-ip').innerText = inc.source_ip || 'Unknown';
+
+            // Show/Hide Artifacts
+            const artifactsContainer = document.getElementById('main-artifacts');
+            const artifactsSection = document.getElementById('intel-section');
+
+            if (inc.threat_intel_indicators && inc.threat_intel_indicators.length > 0) {
+                artifactsSection.classList.remove('hidden');
+                artifactsContainer.innerHTML = inc.threat_intel_indicators.map(i =>
+                    `<span class="px-2 py-1 rounded bg-soc-danger/20 text-soc-danger border border-soc-danger/50 text-xs font-mono font-bold">${i}</span>`
+                ).join('');
+            } else {
+                artifactsSection.classList.add('hidden');
+            }
+
+            // Focus on Node in Graph
+            if (network && nodes.get(inc.source_ip)) {
+                network.focus(inc.source_ip, { scale: 1.2, animation: true });
+                network.selectNodes([inc.source_ip]);
+            }
+        }
+
+        function getRiskColor(score) {
+            if (score >= 80) return 'border-soc-danger';
+            if (score >= 50) return 'border-soc-warning';
+            return 'border-soc-success';
+        }
+
+        function getRiskScoreColor(score) {
+            if (score >= 80) return 'text-soc-danger';
+            if (score >= 50) return 'text-soc-warning';
+            return 'text-soc-success';
+        }
+
+        // Initialize
+        initGraph();
+        fetchInitialIncidents();
+        connectWebSocket();
+    </script>
+</body>
+
+</html>
