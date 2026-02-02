@@ -7,6 +7,7 @@
     <title>SOC-AI 3.0 Command Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -147,15 +148,15 @@
                 </div>
             </div>
 
-            <!-- Technical Details -->
+            <!-- Analytics Section -->
             <div class="grid grid-cols-2 gap-4">
-                <div class="glass p-6 rounded-xl">
-                    <h3 class="text-slate-400 text-sm uppercase mb-2">MITRE Tactic</h3>
-                    <div id="main-mitre" class="text-lg font-mono text-soc-warning">--</div>
+                <div class="glass p-4 rounded-xl">
+                    <h3 class="text-slate-400 text-sm uppercase mb-2">Tactical Distribution</h3>
+                    <canvas id="tacticChart" height="150"></canvas>
                 </div>
-                <div class="glass p-6 rounded-xl">
-                    <h3 class="text-slate-400 text-sm uppercase mb-2">Source IP</h3>
-                    <div id="main-ip" class="text-lg font-mono text-gray-300">--</div>
+                <div class="glass p-4 rounded-xl">
+                    <h3 class="text-slate-400 text-sm uppercase mb-2">Risk Overview</h3>
+                    <canvas id="riskChart" height="150"></canvas>
                 </div>
             </div>
         </div>
@@ -187,25 +188,98 @@
             network = new vis.Network(container, data, options);
         }
 
+        let tacticChart, riskChart;
+
         function updateGraph(incident) {
-            // Add Attacker Node
+            const tactic = incident.mitre_tactic || 'Unknown';
+
+            // 1. Create Tactic Node (Cluster Center)
+            if (!nodes.get(tactic)) {
+                nodes.add({
+                    id: tactic,
+                    label: tactic,
+                    color: '#8b5cf6', // Violet
+                    shape: 'diamond',
+                    size: 20
+                });
+                // Link Tactic to Core
+                edges.add({ from: tactic, to: 'local', arrows: 'to', color: { color: '#8b5cf6' } });
+            }
+
+            // 2. Add Attacker Node (Linked to Tactic)
             if (!nodes.get(incident.source_ip)) {
                 nodes.add({
                     id: incident.source_ip,
-                    label: incident.source_ip + '\n(' + incident.mitre_tactic + ')',
+                    label: incident.source_ip,
                     color: incident.risk_score > 80 ? '#ef4444' : '#f59e0b',
-                    shape: 'dot'
+                    shape: 'dot',
+                    size: 10
                 });
 
-                // Link to Local Network
                 edges.add({
                     from: incident.source_ip,
-                    to: 'local',
+                    to: tactic,
                     arrows: 'to',
-                    color: { color: '#ef4444', highlight: '#ef4444' },
-                    label: incident.mitre_tactic
+                    color: { color: '#334155' } // slate-700
                 });
             }
+
+            // Update Stats
+            updateCharts();
+        }
+
+        function updateCharts() {
+            const incidents = Object.values(incidentsMap);
+
+            // Tactic Counts
+            const tactics = {};
+            incidents.forEach(i => {
+                const t = i.mitre_tactic || 'Unknown';
+                tactics[t] = (tactics[t] || 0) + 1;
+            });
+
+            // Risk Level Counts
+            let high = 0, med = 0, low = 0;
+            incidents.forEach(i => {
+                if (i.risk_score >= 80) high++;
+                else if (i.risk_score >= 50) med++;
+                else low++;
+            });
+
+            // Render Tactic Chart
+            const ctx1 = document.getElementById('tacticChart').getContext('2d');
+            if (tacticChart) tacticChart.destroy();
+            tacticChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(tactics),
+                    datasets: [{
+                        data: Object.values(tactics),
+                        backgroundColor: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { plugins: { legend: { display: false } }, responsive: true }
+            });
+
+            // Render Risk Chart
+            const ctx2 = document.getElementById('riskChart').getContext('2d');
+            if (riskChart) riskChart.destroy();
+            riskChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: ['Critical', 'High', 'Low'],
+                    datasets: [{
+                        label: 'Incidents',
+                        data: [high, med, low],
+                        backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
+                    }]
+                },
+                options: {
+                    scales: { y: { beginAtZero: true, grid: { color: '#334155' } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
         }
 
         function connectWebSocket() {
