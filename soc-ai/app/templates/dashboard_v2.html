@@ -22,41 +22,13 @@
     </style>
 </head>
 
-<body class="h-screen overflow-hidden flex flex-col p-6 bg-soc-bg text-slate-100 font-sans antialiased">
-    <!-- Robust Loading Screen (No Tailwind Dependency) -->
-    <div id="loading-screen"
-        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; color: white;">
-        <div
-            style="width: 60px; height: 60px; border: 4px solid #3b82f6; border-top: 4px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;">
-        </div>
-        <h2 style="font-size: 1.5rem; font-weight: bold; margin-top: 1rem; font-family: sans-serif;">Initializing
-            SOC-AI...</h2>
-        <p id="loading-text" style="color: #94a3b8; font-family: monospace; margin-top: 0.5rem;">Secure Uplink...</p>
-    </div>
-    <style>
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-    </style>
-
-
+<body class="min-h-screen overflow-y-auto flex flex-col p-6 bg-soc-bg text-slate-100 font-sans antialiased">
     <div id="global-error"
         class="hidden fixed top-0 left-0 w-full bg-red-600 text-white p-2 text-center z-50 font-bold shadow-lg"></div>
 
     <script>
         window.onerror = function (msg, url, line, col, error) {
             const banner = document.getElementById('global-error');
-            const loader = document.getElementById('loading-screen');
-
-            // Hide loader if error occurs
-            if (loader) loader.classList.add('hidden');
-
             banner.innerText = `System Error: ${msg} (Line ${line})`;
             banner.classList.remove('hidden');
             console.error("Global Error:", error);
@@ -84,7 +56,7 @@
     </header>
 
     <!-- Main Grid -->
-    <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <main class="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <!-- Left: Incident Feed -->
         <div class="lg:col-span-1 flex flex-col h-full gap-4">
@@ -286,17 +258,6 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
     <script>
-        // Check for CDN failures
-        setTimeout(() => {
-            if (typeof tailwind === 'undefined') {
-                const loader = document.getElementById('loading-text');
-                if (loader) {
-                    loader.innerText = "Error: Cannot load visual libraries (CDN Blocked). Check Internet.";
-                    loader.style.color = "red";
-                }
-            }
-        }, 5000);
-
         let incidentsMap = {};
         let socket;
         let network;
@@ -499,13 +460,9 @@
                 });
                 renderFeed();
 
-                // Success: Remove Loader
-                document.getElementById('loading-screen')?.classList.add('hidden');
-
             } catch (e) {
-                console.log("Initial fetch error:", e);
-                document.getElementById('loading-text').innerText = "Connection Failed: " + e.message;
-                document.getElementById('loading-text').classList.add('text-red-500');
+                console.error("Initial fetch error:", e);
+                // Show error in console, dashboard will remain empty until data arrives
             }
         }
 
@@ -572,8 +529,6 @@
 
             document.getElementById('main-stage').innerText = inc.attack_stage || 'Unknown';
             document.getElementById('main-narrative').innerText = inc.narrative || 'No details available.';
-            document.getElementById('main-mitre').innerText = inc.mitre_tactic || 'Unknown';
-            document.getElementById('main-ip').innerText = inc.source_ip || 'Unknown';
 
             // Show/Hide Artifacts
             const artifactsContainer = document.getElementById('main-artifacts');
@@ -702,18 +657,58 @@
             document.getElementById('log-modal').classList.add('hidden');
         }
 
-        // Initialize Safely
-        setTimeout(() => {
-            console.log("Starting Initialization...");
+        // Wait for dependencies before initializing
+        function checkDependencies() {
+            const deps = {
+                vis: typeof vis !== 'undefined',
+                Chart: typeof Chart !== 'undefined',
+                L: typeof L !== 'undefined'
+            };
 
-            // 1. Fetch Data (CRITICAL - DO THIS FIRST)
+            const allLoaded = Object.values(deps).every(loaded => loaded);
+            console.log("Dependency Check:", deps, "All Loaded:", allLoaded);
+
+            return allLoaded;
+        }
+
+        function initializeDashboard() {
+            console.log("=== DASHBOARD INITIALIZATION STARTED ===");
+
+            // CRITICAL: Fetch data FIRST (works without dependencies)
+            console.log("Step 1: Fetching initial incidents...");
             fetchInitialIncidents();
 
-            // 2. Initialize Visuals (Swallow Errors so App doesn't crash)
+            // Then initialize visuals (these need the CDN libraries)
+            console.log("Step 2: Initializing graph...");
             try { initGraph(); } catch (e) { console.error("Graph Init Failed:", e); }
+
+            console.log("Step 3: Initializing map...");
             try { initMap(); } catch (e) { console.error("Map Init Failed:", e); }
+
+            console.log("Step 4: Connecting WebSocket...");
             try { connectWebSocket(); } catch (e) { console.error("WS Init Failed:", e); }
-        }, 100);
+
+            console.log("=== DASHBOARD INITIALIZATION COMPLETE ===");
+        }
+
+        // Try initialization every 500ms until dependencies are ready (max 20 seconds)
+        let initAttempts = 0;
+        const maxAttempts = 40;
+
+        const initInterval = setInterval(() => {
+            initAttempts++;
+            console.log(`Init attempt ${initAttempts}/${maxAttempts}`);
+
+            if (checkDependencies()) {
+                clearInterval(initInterval);
+                initializeDashboard();
+            } else if (initAttempts >= maxAttempts) {
+                clearInterval(initInterval);
+                console.error("Dependencies failed to load after 20 seconds - proceeding with data only");
+                // Still try to load data even if visuals fail
+                fetchInitialIncidents();
+            }
+        }, 500);
     </script>
 </body>
 
