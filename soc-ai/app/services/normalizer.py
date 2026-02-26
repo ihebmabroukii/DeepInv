@@ -2,8 +2,13 @@ from app.schemas.alert import RawAlert, NormalizedAlert, SeverityEnum
 from loguru import logger
 import uuid
 from datetime import datetime
+from sentence_transformers import SentenceTransformer
 
 class Normalizer:
+    def __init__(self):
+        logger.info("Loading SentenceTransformer model...")
+        self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
     async def process(self, raw_alert: RawAlert) -> NormalizedAlert:
         """
         Main entry point to normalize alerts.
@@ -11,11 +16,16 @@ class Normalizer:
         """
         try:
             if raw_alert.source_system == "wazuh":
-                return self._normalize_wazuh(raw_alert)
+                alert = self._normalize_wazuh(raw_alert)
             elif raw_alert.source_system == "suricata":
-                return self._normalize_suricata(raw_alert)
+                alert = self._normalize_suricata(raw_alert)
             else:
                 raise ValueError(f"Unknown source system: {raw_alert.source_system}")
+            
+            # Generate embedding for semantic RAG
+            text_to_embed = f"{alert.name} {alert.description or ''} User: {alert.user or 'None'} Process: {alert.process_name or 'None'} IP: {alert.src_ip or 'None'} -> {alert.dst_ip or 'None'}"
+            alert.embedding = self.embedding_model.encode(text_to_embed).tolist()
+            return alert
         except Exception as e:
             logger.error(f"Failed to normalize alert from {raw_alert.source_system}: {e}")
             raise
@@ -34,6 +44,14 @@ class Normalizer:
         elif level >= 10: severity = SeverityEnum.HIGH
         elif level >= 7: severity = SeverityEnum.MEDIUM
 
+        # Entity Extraction
+        inner_data = data.get('data', {})
+        syscheck = data.get('syscheck', {})
+        
+        user = inner_data.get('srcuser') or inner_data.get('dstuser') or inner_data.get('user')
+        process_name = inner_data.get('process') or data.get('program_name')
+        file_hash = syscheck.get('sha256_after') or inner_data.get('sha256')
+
         return NormalizedAlert(
             alert_id=str(uuid.uuid4()),
             original_alert_id=data.get('id'),
@@ -46,7 +64,11 @@ class Normalizer:
             src_ip=data.get('srcip'),
             dst_ip=data.get('dstip'),
             hostname=data.get('agent', {}).get('name'),
-            mitre_technique_id=self._get_mitre(data)
+            mitre_technique_id=self._get_mitre(data),
+            
+            user=user,
+            process_name=process_name,
+            file_hash=file_hash
         )
 
     def _normalize_suricata(self, raw: RawAlert) -> NormalizedAlert:
@@ -59,6 +81,9 @@ class Normalizer:
         if severity_int == 1: severity = SeverityEnum.HIGH
         elif severity_int == 2: severity = SeverityEnum.MEDIUM
 
+        # Entity Extraction (Suricata might have app_proto, payload context)
+        process_name = data.get('app_proto')
+        
         return NormalizedAlert(
             alert_id=str(uuid.uuid4()),
             timestamp=raw.timestamp,
@@ -70,7 +95,9 @@ class Normalizer:
             src_ip=data.get('src_ip'),
             dst_ip=data.get('dest_ip'),
             src_port=data.get('src_port'),
-            dst_port=data.get('dest_port')
+            dst_port=data.get('dest_port'),
+            
+            process_name=process_name
         )
         
     def _get_mitre(self, data: dict) -> str | None:

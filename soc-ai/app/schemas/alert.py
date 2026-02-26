@@ -46,11 +46,16 @@ class NormalizedAlert(BaseModel):
     hostname: Optional[str] = None
     user: Optional[str] = None
     file_path: Optional[str] = None
+    process_name: Optional[str] = None
+    file_hash: Optional[str] = None
     
     # Context
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
     
+    # AI Extension
+    embedding: Optional[List[float]] = None
+
     raw_data: Dict[str, Any] = Field(default_factory=dict) # Included for Dashboard visibility
 
 class Incident(BaseModel):

@@ -1,0 +1,49 @@
+# Filebeat - Wazuh alerts to Security Onion
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/ossec/logs/alerts/alerts.json
+    json.keys_under_root: true
+    json.add_error_key: true
+    json.overwrite_keys: true
+    fields:
+      source: wazuh
+    fields_under_root: true
+
+# Optional: also tail archives
+  - type: log
+    enabled: false
+    paths:
+      - /var/ossec/logs/archives/archives.json
+    json.keys_under_root: true
+    json.add_error_key: true
+    fields:
+      source: wazuh-archives
+    fields_under_root: true
+
+processors:
+  - drop_fields:
+      fields: ["host", "agent.ephemeral_id"]
+      ignore_missing: true
+
+output.logstash:
+  # Security Onion VM Beats input (port 5644) with TLS (self-signed cert)
+  hosts: ["${SECURITY_ONION_HOST}:5044"]
+  ssl.enabled: true
+  ssl.verification_mode: none   # Security Onion uses a self-signed cert
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+  permissions: 0644
+
+seccomp:
+  default_action: allow
+  syscalls:
+  - action: allow
+    names:
+    - rseq

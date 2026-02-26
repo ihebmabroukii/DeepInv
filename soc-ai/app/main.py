@@ -12,6 +12,11 @@ async def lifespan(app: FastAPI):
     logger.info("Starting AI-Driven SOC Analyst System...")
     
     try:
+        # Initialize Aggregator (RediSearch)
+        logger.info("Initializing Aggregator (RediSearch)...")
+        from app.services.aggregator import aggregator
+        await aggregator.initialize()
+
         # Start Ingestion Service
         logger.info("Importing IngestionService...")
         from app.services.ingestor import ingestor
@@ -21,6 +26,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.critical(f"Startup Failed: {e}")
         # Don't re-raise, let the app start so we can see health check failure
+        
+    logger.info("Lifespan Startup block finished")
+    import asyncio
+    for task in asyncio.all_tasks():
+        logger.debug(f"Running Task: {task.get_coro().__name__ if hasattr(task.get_coro(), '__name__') else 'Unknown'}")
         
     yield
     

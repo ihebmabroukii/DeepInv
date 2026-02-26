@@ -8,13 +8,14 @@ services:
     restart: always
     ports:
       - "8001:8000"
+    command: /bin/bash -c "pip install celery redis pydantic && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       - WAZUH_API_URL=https://wazuh.manager:55000
       - WAZUH_API_USER=wazuh
       - WAZUH_API_PASSWORD=wazuh
       - SURICATA_LOG_PATH=/var/log/suricata/eve.json
       - THEHIVE_URL=http://thehive:9000
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://soc-ai-redis:6379/0
       - OLLAMA_BASE_URL=http://ollama:11434
       - AI_MODEL_NAME=mistral
       # Dynamic Hostname (DNS Verified)
@@ -24,9 +25,34 @@ services:
       - soc-tier1_suricata-logs:/var/log/suricata:ro
       - soc-tier1_wazuh-logs:/var/ossec/logs:ro
       - ./logs:/app/logs
+      - ./app:/app/app
     networks:
       - soc_net
     depends_on:
+      - ollama
+      - redis
+
+  celery_worker:
+    build: .
+    container_name: soc-ai-celery
+    command: /bin/bash -c "pip install celery redis pydantic && celery -A app.worker.celery_app worker --loglevel=info"
+    user: "0:0"
+    restart: always
+    environment:
+      - REDIS_URL=redis://soc-ai-redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - AI_MODEL_NAME=mistral
+      - WAZUH_API_URL=https://wazuh.manager:55000
+      - WAZUH_API_USER=wazuh
+      - WAZUH_API_PASSWORD=wazuh
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=REDACTED
+    networks:
+      - soc_net
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
       - ollama
 
   ollama:
@@ -39,7 +65,7 @@ services:
     restart: always
 
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     container_name: soc-ai-redis
     networks:
       - soc_net

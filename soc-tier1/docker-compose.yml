@@ -1,82 +1,14 @@
-version: '3.7'
+# NOTE: network_mode: "host" only works on Linux (Docker Engine).
+# It is NOT supported on Docker Desktop for Windows/macOS.
+# If running on Windows WSL2 with Docker Engine inside the VM, this works fine.
 
 services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
-    container_name: elasticsearch
-    environment:
-      - node.name=elasticsearch
-      - cluster.name=es-docker-cluster
-      - discovery.type=single-node
-      - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - xpack.security.enabled=true
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
-    ports:
-      - "9200:9200"
-    networks:
-      - wazuh-network
-      - soc-tier2_net
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:${KIBANA_VERSION}
-    container_name: kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - WAZUH_API_URL=https://wazuh.manager:55000/
-      - WAZUH_USER=wazuh
-      - WAZUH_PASSWORD=wazuh
-    ports:
-      - "5601:5601"
-    depends_on:
-      - elasticsearch
-    volumes:
-      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml
-      - ./kibana/config/wazuh.yml:/usr/share/kibana/data/wazuh/config/wazuh.yml
-    command: >
-      /bin/bash -c " /usr/share/kibana/bin/kibana-plugin list | grep wazuh || /usr/share/kibana/bin/kibana-plugin install https://packages.wazuh.com/4.x/ui/kibana/wazuh_kibana-${WAZUH_PLUGIN_VERSION}.zip; /usr/local/bin/kibana-docker "
-    networks:
-      - wazuh-network
-
-  logstash:
-    image: docker.elastic.co/logstash/logstash:${LOGSTASH_VERSION}
-    container_name: logstash
-    environment:
-      - ELASTICSEARCH_HOST=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-    ports:
-      - "5044:5044"
-      - "5000:5000/tcp"
-      - "5000:5000/udp"
-    volumes:
-      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
-      - ./logstash/pipeline:/usr/share/logstash/pipeline
-      - waf-logs:/usr/share/logstash/waf-logs
-    depends_on:
-      - elasticsearch
-    networks:
-      - wazuh-network
-
   wazuh.manager:
     image: wazuh/wazuh-manager:${WAZUH_VERSION}
     container_name: wazuh.manager
     hostname: wazuh.manager
-    ports:
-      - "1514:1514"
-      - "1515:1515"
-      # - "55555:55000"
+    network_mode: "host"
     environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - ELASTIC_USERNAME=elastic
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
     volumes:
       - wazuh-api-configuration:/var/ossec/api/configuration
@@ -88,32 +20,30 @@ services:
       - wazuh-active-response:/var/ossec/active-response/bin
       - wazuh-agentless:/var/ossec/agentless
       - wazuh-wodles:/var/ossec/wodles
-      - suricata-logs:/var/log/suricata
-      - ./wazuh-manager/config/filebeat.yml:/etc/filebeat/filebeat.yml
       - ./wazuh-manager/config/ossec.conf:/var/ossec/etc/ossec.conf
       - ./wazuh-manager/integrations/custom-thehive:/var/ossec/integrations/custom-thehive
-    depends_on:
-      - elasticsearch
-    networks:
-      - wazuh-network
-      - soc-tier2_net
+    restart: unless-stopped
 
-  suricata:
-    image: jasonish/suricata:latest
-    container_name: suricata
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${FILEBEAT_VERSION}
+    container_name: filebeat
+    user: root
     network_mode: "host"
-    cap_add:
-      - NET_ADMIN
-      - SYS_NICE
-      - NET_RAW
+    environment:
+      - SECURITY_ONION_HOST=${SECURITY_ONION_HOST}
     volumes:
-      - ./suricata/config:/etc/suricata
-      - suricata-logs:/var/log/suricata
-    command: -i eth0 # CHANGE THIS TO YOUR HOST INTERFACE
+      - ./filebeat/config/filebeat.yml:/tmp/filebeat_src.yml:ro
+      - wazuh-logs:/var/ossec/logs:ro
+    entrypoint: [ "/bin/bash", "-c" ]
+    command: [ "cp /tmp/filebeat_src.yml /usr/share/filebeat/filebeat.yml && chmod 600 /usr/share/filebeat/filebeat.yml && exec filebeat -e" ]
+    depends_on:
+      - wazuh.manager
+    restart: unless-stopped
 
   vpn:
     image: linuxserver/wireguard:latest
     container_name: wireguard
+    network_mode: "host"
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -130,32 +60,23 @@ services:
     volumes:
       - ./vpn/config:/config
       - /lib/modules:/lib/modules
-    ports:
-      - "51820:51820/udp"
-    sysctls:
-      - net.ipv4.conf.all.src_valid_mark=1
     restart: unless-stopped
-    networks:
-      - wazuh-network
 
   waf:
     image: owasp/modsecurity-crs:nginx
     container_name: waf
+    network_mode: "host"
     environment:
       - PARANOIA=1
       - ANOMALY_INBOUND=5
       - ANOMALY_OUTBOUND=4
       - PROXY_SSL=off
-      - BACKEND=http://kibana:5601
-    ports:
-      - "80:80"
+      - BACKEND=http://localhost:55000 # wazuh.manager shares host network
     volumes:
       - waf-logs:/var/log
-    networks:
-      - wazuh-network
+    restart: unless-stopped
 
 volumes:
-  elasticsearch-data:
   wazuh-api-configuration:
   wazuh-etc:
   wazuh-logs:
@@ -165,13 +86,4 @@ volumes:
   wazuh-active-response:
   wazuh-agentless:
   wazuh-wodles:
-  suricata-logs:
   waf-logs:
-
-
-networks:
-  wazuh-network:
-    driver: bridge
-  soc-tier2_net:
-    external: true
-    name: soc-tier2_soc-tier2-net

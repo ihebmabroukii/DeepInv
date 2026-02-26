@@ -128,26 +128,10 @@ class IngestionService:
                 for incident in incidents:
                     logger.info(f"Analyzing Incident {incident.id} with {len(incident.alerts)} alerts...")
 
-                    # 1.5 Fetch Context (Stateful Memory)
-                    context = await self.aggregator.get_context(incident.source_ip)
-                    if context:
-                        logger.info(f"Found previous context for {incident.source_ip}")
-
-                    # 1.6 Fetch Threat Intel (OpenCTI)
-                    intel_report = await threat_intel.enrich_ip(incident.source_ip)
-                    if intel_report:
-                        logger.info(f"Threat Intelligence found for {incident.source_ip}")
-
-                    # 2. AI Analysis (Chain-of-Thought with Context & Intel)
-                    analyzed_incident = await self.llm_engine.analyze_incident(
-                        incident, 
-                        previous_context=context,
-                        intel_context=intel_report
-                    )
-                    
-                    # 3. Save Result for Dashboard & Update Context
-                    logger.info(f"Incident Explored: {analyzed_incident.narrative}")
-                    await self.aggregator.save_incident(analyzed_incident)
+                    # Offload to Celery instead of blocking
+                    logger.info("Dispatching Incident to Celery Worker...")
+                    from app.worker import analyze_incident_task
+                    analyze_incident_task.delay(incident.model_dump(mode="json"))
                     
                 await asyncio.sleep(5) # Poll every 5 seconds
                 
