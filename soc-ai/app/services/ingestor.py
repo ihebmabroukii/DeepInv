@@ -122,16 +122,30 @@ class IngestionService:
         logger.info("Starting AI Analysis Loop")
         while self.running:
             try:
+                logger.info("Tick: Checking for pending incidents...")
                 # 1. Fetch pending incidents from Aggregator
                 incidents = await self.aggregator.get_pending_incidents()
                 
                 for incident in incidents:
                     logger.info(f"Analyzing Incident {incident.id} with {len(incident.alerts)} alerts...")
 
-                    # Offload to Celery instead of blocking
-                    logger.info("Dispatching Incident to Celery Worker...")
-                    from app.worker import analyze_incident_task
-                    analyze_incident_task.delay(incident.model_dump(mode="json"))
+                    # Run analysis directly in the native async event loop
+                    # Celery workers cause forked-process async HTTP client conflicts
+                    # The async ingestor loop is the correct context for LangGraph
+                    context = await self.aggregator.get_context(incident.source_ip)
+                    intel_report = await threat_intel.enrich_ip(incident.source_ip)
+                    
+                    logger.info(f"Executing LangGraph Analysis for Incident {incident.id}...")
+                    analyzed = await self.llm_engine.analyze_incident(
+                        incident,
+                        previous_context=context,
+                        intel_context=intel_report
+                    )
+                    logger.info(
+                        f"LangGraph Done! risk={analyzed.risk_score}, "
+                        f"stage={analyzed.attack_stage}, mitre={analyzed.mitre_tactic}"
+                    )
+                    await self.aggregator.save_incident(analyzed)
                     
                 await asyncio.sleep(5) # Poll every 5 seconds
                 

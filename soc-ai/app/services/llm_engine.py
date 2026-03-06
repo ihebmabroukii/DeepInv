@@ -70,9 +70,8 @@ class LLMEngine:
         incident = state["incident"]
         alerts_summary = "\\n".join([f"{a.name}: {a.description}" for a in incident.alerts[:5]])
         
-        json_schema = '{"entities": ["list of users/IPs/processes"], "mitre_tactic": "MITRE Tactic Name"}'
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are a SOC analyst. Extract entities and map to MITRE ATT&CK. Output ONLY valid JSON matching this exact schema: {json_schema}"),
+            ("system", 'You are a SOC analyst. Extract entities and map to MITRE ATT&CK. Output ONLY valid JSON with exactly these keys: {{"entities": ["string"], "mitre_tactic": "string"}}'),
             ("user", "Alerts:\n{alerts}")
         ])
         
@@ -118,9 +117,8 @@ class LLMEngine:
 
     async def node_reviewer(self, state: AgentState) -> Dict:
         """Agent 3: Final Review and Strict JSON Formatting"""
-        json_schema = '{"narrative": "string", "risk_score": 0-100, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}'
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are a SOC Manager. Review the provided information and write a final incident report. Output ONLY valid JSON matching exactly: {json_schema}"),
+            ("system", 'You are a SOC Manager. Write a final incident report. Output ONLY valid JSON with exactly these keys: {{"narrative": "string", "risk_score": 75, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}}'),
             ("user", "Draft Narrative:\n{draft}\n\nUEBA Context:\n{ueba}\n\nThreat Intel:\n{intel}\n\nExtracted Entities:\n{entities}")
         ])
         
@@ -168,8 +166,8 @@ class LLMEngine:
                 "behavior_context": behavior_report,
             }
             
-            # Execute Graph
-            result = await asyncio.wait_for(self.app.ainvoke(initial_state), timeout=250.0)
+            # Execute Graph (no asyncio.wait_for — timeout handled at the Celery level)
+            result = await self.app.ainvoke(initial_state)
             
             final_data = result.get("final_json", {})
             entities = result.get("extracted_entities", {})
