@@ -26,6 +26,7 @@ services:
       - soc-tier1_wazuh-logs:/var/ossec/logs:ro
       - ./logs:/app/logs
       - ./app:/app/app
+      - ./playbooks:/app/playbooks
     networks:
       - soc_net
     depends_on:
@@ -51,6 +52,7 @@ services:
       - soc_net
     volumes:
       - ./app:/app/app
+      - ./playbooks:/app/playbooks
     depends_on:
       - redis
       - ollama

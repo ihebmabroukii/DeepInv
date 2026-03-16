@@ -42,6 +42,79 @@ class AggregatorService:
                 logger.info("Created 'idx:alerts' index")
         except Exception as e:
             logger.error(f"Failed to initialize RediSearch: {e}")
+            
+        await self.initialize_playbooks()
+
+    async def initialize_playbooks(self):
+        try:
+            from redis.commands.search.field import TextField, VectorField
+            from redis.commands.search.index_definition import IndexDefinition, IndexType
+            import os
+            from sentence_transformers import SentenceTransformer
+            
+            # Check if index exists
+            try:
+                await self.redis.ft("idx:playbooks").info()
+            except Exception:
+                schema = (
+                    TextField("$.name", as_name="name"),
+                    TextField("$.content", as_name="content"),
+                    VectorField("$.embedding", "HNSW", {"TYPE": "FLOAT32", "DIM": 384, "DISTANCE_METRIC": "COSINE"}, as_name="embedding")
+                )
+                await self.redis.ft("idx:playbooks").create_index(
+                    schema,
+                    definition=IndexDefinition(prefix=["playbook:"], index_type=IndexType.JSON)
+                )
+                logger.info("Created 'idx:playbooks' index")
+
+            # Load playbooks from disk
+            playbooks_dir = os.path.join(os.getcwd(), "playbooks")
+            if not os.path.exists(playbooks_dir):
+                logger.warning(f"Playbooks directory not found at {playbooks_dir}")
+                return
+                
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            
+            for file_name in os.listdir(playbooks_dir):
+                if file_name.endswith(".md"):
+                    with open(os.path.join(playbooks_dir, file_name), "r", encoding="utf-8") as f:
+                        content = f.read()
+                    
+                    embedding = model.encode(content).tolist()
+                    playbook_doc = {
+                        "name": file_name,
+                        "content": content,
+                        "embedding": embedding
+                    }
+                    await self.redis.json().set(f"playbook:{file_name}", "$", playbook_doc)
+            logger.info("Playbooks loaded and vectorized into Redis")
+        except Exception as e:
+            logger.error(f"Failed to initialize playbooks: {e}")
+
+    async def get_relevant_playbook(self, query: str) -> str:
+        """
+        Retrieves the most semantically relevant playbook for a given query (e.g., MITRE tactic).
+        """
+        try:
+            from sentence_transformers import SentenceTransformer
+            from redis.commands.search.query import Query
+            import numpy as np
+            
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            query_vector = model.encode(query).tolist()
+            
+            q_str = "*=>[KNN 1 @embedding $vec AS score]"
+            q = Query(q_str).sort_by("score").return_fields("content", "score").dialect(2)
+            query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
+            
+            res = await self.redis.ft("idx:playbooks").search(q, query_params={"vec": query_vector_bytes})
+            
+            if res.docs:
+                return res.docs[0].content
+            return "No specific playbook found. Provide standard best-practice security recommendations."
+        except Exception as e:
+            logger.error(f"Failed to fetch playbook for query '{query}': {e}")
+            return "No specific playbook found. Provide standard best-practice security recommendations."
 
     async def ingest(self, alert: NormalizedAlert):
         """

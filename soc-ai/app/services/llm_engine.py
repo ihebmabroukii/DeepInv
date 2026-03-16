@@ -117,23 +117,38 @@ class LLMEngine:
 
     async def node_reviewer(self, state: AgentState) -> Dict:
         """Agent 3: Final Review and Strict JSON Formatting"""
+        
+        # 1. Playbook RAG: Fetch relevant company SOP based on the extracted Tactic
+        try:
+            entities = state.get("extracted_entities", {})
+            tactic = entities.get("mitre_tactic", "Unknown")
+            playbook_text = await aggregator.get_relevant_playbook(tactic)
+            logger.info(f"Fetched Playbook for {tactic}: {len(playbook_text)} chars")
+        except Exception as e:
+            logger.error(f"Playbook fetch failed: {e}")
+            playbook_text = "Standard security best practices."
+
         prompt = ChatPromptTemplate.from_messages([
-            ("system", 'You are a SOC Manager. Write a final incident report. Output ONLY valid JSON with exactly these keys: {{"narrative": "string", "risk_score": 75, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}}'),
-            ("user", "Draft Narrative:\n{draft}\n\nUEBA Context:\n{ueba}\n\nThreat Intel:\n{intel}\n\nExtracted Entities:\n{entities}")
+            ("system", 'You are a strict SOC Manager. Your ONLY job is to output a raw JSON object. Do not output anything else. You must write a final narrative report that OVERRIDES the draft recommendations with the Company SOP Playbook recommendations. JSON keys must be exactly: {{"narrative": "string", "risk_score": 75, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}}'),
+            ("user", "Draft Narrative:\n{draft}\n\nCompany SOP Playbook (MANDATORY):\n{playbook_text}\n\nThreat Intel:\n{intel}")
         ])
         
         try:
             chain = prompt | self.llm_json | JsonOutputParser()
             res = await chain.ainvoke({
+                "playbook_text": playbook_text,
                 "draft": state.get("draft_narrative", ""),
-                "ueba": state.get("behavior_context", "None"),
-                "intel": state.get("intel_context", "None"),
-                "entities": json.dumps(state.get("extracted_entities", {}))
+                "intel": state.get("intel_context", "None")
             })
             final_json = IncidentReport.model_validate(res).model_dump()
+            
+            # Deterministic Playbook Injection (To prevent LLM hallucination/omission)
+            if playbook_text and playbook_text != "Standard security best practices.":
+                final_json["narrative"] += f"\n\n### 🛡️ Enforced Company SOP ({tactic})\n{playbook_text}"
+                
         except Exception as e:
             logger.error(f"Reviewer parsing failed: {e}")
-            final_json = {"narrative": state.get("draft_narrative", ""), "risk_score": 50, "status": "investigating", "attack_stage": "Unknown", "threat_intel_indicators": [], "ueba_indicators": []}
+            final_json = {"narrative": state.get("draft_narrative", "") + "\n\nSOP Applied:\n" + playbook_text, "risk_score": 50, "status": "investigating", "attack_stage": "Unknown", "threat_intel_indicators": [], "ueba_indicators": []}
             
         return {"final_json": final_json}
 

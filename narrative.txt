@@ -1,0 +1,37 @@
+Potential Lateral Movement and Data Exfiltration Incident
+Incident Summary:
+A series of concerning events have been detected, indicating a potential advanced persistent threat (APT) activity within our network. The primary focus of this analysis is the IP addresses 1.1.1.1 and 10.0.99.100, which have shown signs of data exfiltration attempts and possible lateral movement.
+
+New Alerts:
+- Massive Data Exfiltration Attempt: Anomalous outbound traffic from IP address 1.1.1.1 was observed, suggesting an attempt to transfer large amounts of data outside the network. This activity is highly unusual and indicates a potential data breach or unauthorized access.
+
+Graph History:
+- No graph context available for this incident. However, the absence of historical data does not necessarily mean that there have been no previous related events. Further investigation is required to determine if this is an isolated incident or part of a larger campaign.
+
+Semantic Context:
+- No semantic context was found in relation to these IP addresses or the detected activities. It is essential to gather more information about the involved entities, such as user accounts, applications, and potential threat actors, to better understand the nature and scope of this incident.
+
+Lateral Movement Analysis:
+- If IPs traverse through our network, it is crucial to identify any other systems or resources they may have accessed. This will help us determine the extent of the attacker's presence within our environment and assist in containing the threat.
+
+Recommendations for Further Investigation:
+1. Thoroughly examine the logs and network traffic associated with IP addresses 1.1.1.1 and 10.0.99.100 to identify any patterns or anomalies that may indicate lateral movement.
+2. Investigate user accounts, applications, and services associated with these IPs to determine if they have been compromised.
+3. Analyze the data being exfiltrated to identify sensitive information and potential targets of the attacker.
+4. Implement network segmentation and access controls to limit the attacker's ability to move laterally within our network.
+5. Collaborate with external threat intelligence sources to gather more information about the threat actor(s) involved in this incident.
+6. Notify affected parties, if any, and provide recommendations for remediation and recovery.
+
+UEBA Context:
+Behavioral Analysis Unavailable (Elasticsearch not reachable).
+
+Threat Intel:
+No Threat Intelligence found for this IP.
+
+Extracted Entities:
+{"entities": [
+"User",
+"400GB of customer SQL backups",
+"external server via FTP"
+],
+"mitre_tactic": "Exfiltration"}
