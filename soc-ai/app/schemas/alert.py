@@ -58,6 +58,11 @@ class NormalizedAlert(BaseModel):
 
     raw_data: Dict[str, Any] = Field(default_factory=dict) # Included for Dashboard visibility
 
+class ThreatIntelReturns(BaseModel):
+    opencti: List[str] = []
+    cortex: List[str] = []
+    thehive: List[str] = []
+
 class Incident(BaseModel):
     """
     Represents a group of alerts aggregated by Source IP.
@@ -72,6 +77,10 @@ class Incident(BaseModel):
     status: str = "pending" # pending, analyzing, completed
     risk_score: int = 0
     narrative: str = ""
+    ai_reasoning: str = ""
+    threat_intel: ThreatIntelReturns = Field(default_factory=ThreatIntelReturns)
+    ai_recommendations: str = ""
+    recommended_playbook: str = ""
     rca: str = ""
     mitre_tactic: str = ""
     attack_stage: str = ""

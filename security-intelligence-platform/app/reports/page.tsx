@@ -186,60 +186,71 @@ export default async function ReportsPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Reports */}
+        {/* Recent Reports Data */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Reports</CardTitle>
-            <CardDescription>Previously generated security reports</CardDescription>
+            <CardTitle>Historical Incident Reports</CardTitle>
+            <CardDescription>AI-generated cyber defense analyses pulled natively from the core engine.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {[
-                {
-                  name: "December 2024 - Monthly Security Overview",
-                  date: "Dec 1, 2024",
-                  size: "2.4 MB",
-                  type: "PDF",
-                },
-                {
-                  name: "Critical Incident IR-2024-0342",
-                  date: "Nov 28, 2024",
-                  size: "1.8 MB",
-                  type: "PDF",
-                },
-                {
-                  name: "Q4 2024 Compliance Report",
-                  date: "Nov 25, 2024",
-                  size: "3.2 MB",
-                  type: "PDF",
-                },
-                {
-                  name: "November 2024 - Threat Intelligence",
-                  date: "Nov 20, 2024",
-                  size: "5.1 MB",
-                  type: "PDF",
-                },
-              ].map((report, index) => (
-                <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium text-sm">{report.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {report.date} • {report.size} • {report.type}
-                      </p>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <Download className="h-3 w-3" />
-                    Download
-                  </Button>
-                </div>
-              ))}
+              <ReportsList />
             </div>
           </CardContent>
         </Card>
       </div>
     </DashboardShell>
   )
+}
+
+// Client Component to fetch gracefully
+async function ReportsList() {
+  try {
+    const res = await fetch('http://localhost:8001/api/v1/alerts/incidents', { next: { revalidate: 0 } })
+    if (!res.ok) return <p className="text-muted-foreground p-4">Error loading AI reports.</p>
+    const reports = await res.json()
+    
+    if (reports.length === 0) {
+      return <p className="text-muted-foreground p-4">No AI reports generated yet.</p>
+    }
+
+    return (
+      <>
+        {reports.map((report: any) => (
+          <div key={report.id} className="flex items-center justify-between p-3 border rounded-lg hover:border-blue-500 transition-colors">
+            <div className="flex items-center gap-3">
+              <FileText className="h-5 w-5 text-blue-400" />
+              <div>
+                <p className="font-medium text-sm">Target IP Analysis: {report.source_ip}</p>
+                <div className="flex gap-2 items-center mt-1">
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(report.created_at).toLocaleString()}
+                  </span>
+                  <Badge variant={report.risk_score > 70 ? "destructive" : "secondary"} className="text-[10px] h-4">
+                    Score: {report.risk_score}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] h-4 border-emerald-500 text-emerald-500">
+                    Tactic: {report.mitre_tactic}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <a href={`/reports/${report.id}`}>
+                <Button variant="outline" size="sm" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 hover:text-blue-500">
+                  <FileText className="h-3 w-3" />
+                  View Detailed Report
+                </Button>
+              </a>
+              <Button variant="ghost" size="sm" className="gap-2">
+                <Download className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </>
+    )
+  } catch (error) {
+    return <p className="text-muted-foreground p-4">Cannot connect to the SOC AI backend API.</p>
+  }
 }

@@ -1,0 +1,5 @@
+security_platform_nginx: exited
+admiring_dewdney: exited
+gracious_darwin: exited
+romantic_swirles: exited
+soc-tier2-opencti-connector-history-1: restarting
