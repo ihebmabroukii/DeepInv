@@ -20,6 +20,7 @@ class ExtractedEntities(BaseModel):
 
 class IncidentReport(BaseModel):
     narrative: str = Field(description="Final refined technical story of the incident.")
+    rca: str = Field(description="Root Cause Analysis explaining how the attack started and why it succeeded.")
     risk_score: int = Field(description="Assigned Risk Score from 0 to 100.")
     status: str = Field(default="investigating", description="Incident status (e.g., investigating).")
     attack_stage: str = Field(description="The stage of the attack (e.g., Exploitation).")
@@ -129,7 +130,7 @@ class LLMEngine:
             playbook_text = "Standard security best practices."
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", 'You are a strict SOC Manager. Your ONLY job is to output a raw JSON object. Do not output anything else. You must write a final narrative report that OVERRIDES the draft recommendations with the Company SOP Playbook recommendations. JSON keys must be exactly: {{"narrative": "string", "risk_score": 75, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}}'),
+            ("system", 'You are a strict SOC Manager. Your ONLY job is to output a raw JSON object. Do not output anything else. You must write a final narrative report that OVERRIDES the draft recommendations with the Company SOP Playbook recommendations. You must also include a Root Cause Analysis (rca) explaining how the attack started and why it succeeded. JSON keys must be exactly: {{"narrative": "string", "rca": "string", "risk_score": 75, "status": "investigating", "attack_stage": "string", "threat_intel_indicators": [], "ueba_indicators": []}}'),
             ("user", "Draft Narrative:\n{draft}\n\nCompany SOP Playbook (MANDATORY):\n{playbook_text}\n\nThreat Intel:\n{intel}")
         ])
         
@@ -148,7 +149,7 @@ class LLMEngine:
                 
         except Exception as e:
             logger.error(f"Reviewer parsing failed: {e}")
-            final_json = {"narrative": state.get("draft_narrative", "") + "\n\nSOP Applied:\n" + playbook_text, "risk_score": 50, "status": "investigating", "attack_stage": "Unknown", "threat_intel_indicators": [], "ueba_indicators": []}
+            final_json = {"narrative": state.get("draft_narrative", "") + "\n\nSOP Applied:\n" + playbook_text, "rca": "RCA could not be generated.", "risk_score": 50, "status": "investigating", "attack_stage": "Unknown", "threat_intel_indicators": [], "ueba_indicators": []}
             
         return {"final_json": final_json}
 
@@ -189,6 +190,7 @@ class LLMEngine:
             
             # Update Incident
             incident.narrative = final_data.get("narrative", "Analysis failed to produce narrative.")
+            incident.rca = final_data.get("rca", "RCA not generated.")
             incident.risk_score = final_data.get("risk_score", 0)
             incident.status = final_data.get("status", "analyzed")
             incident.mitre_tactic = entities.get("mitre_tactic", "Unknown")

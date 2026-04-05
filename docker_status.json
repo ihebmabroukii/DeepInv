@@ -1,0 +1,157 @@
+[
+  {
+    "name": "soc-ai",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-ai-celery",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "security_platform_nginx",
+    "state": "running",
+    "status": "Up 11 seconds"
+  },
+  {
+    "name": "security_platform_backend",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "security_platform_db",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-ai-redis",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "filebeat",
+    "state": "running",
+    "status": "Up 16 seconds"
+  },
+  {
+    "name": "wireguard",
+    "state": "running",
+    "status": "Up 16 seconds"
+  },
+  {
+    "name": "wazuh.manager",
+    "state": "running",
+    "status": "Up 16 seconds"
+  },
+  {
+    "name": "waf",
+    "state": "running",
+    "status": "Up 16 seconds (health: starting)"
+  },
+  {
+    "name": "admiring_dewdney",
+    "state": "exited",
+    "status": "Exited (1) 2 months ago"
+  },
+  {
+    "name": "gracious_darwin",
+    "state": "exited",
+    "status": "Exited (1) 2 months ago"
+  },
+  {
+    "name": "cortex",
+    "state": "running",
+    "status": "Up 13 seconds"
+  },
+  {
+    "name": "romantic_swirles",
+    "state": "exited",
+    "status": "Exited (1) 2 months ago"
+  },
+  {
+    "name": "ollama",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-worker-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-connector-export-file-txt-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-connector-export-file-csv-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-connector-export-file-stix-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "opencti-connector-mitre",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "opencti-connector-thehive",
+    "state": "running",
+    "status": "Up 35 seconds"
+  },
+  {
+    "name": "opencti",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "cortex-elasticsearch",
+    "state": "running",
+    "status": "Up 14 seconds"
+  },
+  {
+    "name": "soc-tier2-opencti-connector-history-1",
+    "state": "restarting",
+    "status": "Restarting (137) 20 seconds ago"
+  },
+  {
+    "name": "thehive",
+    "state": "running",
+    "status": "Up 13 seconds"
+  },
+  {
+    "name": "thehive-elasticsearch",
+    "state": "running",
+    "status": "Up 14 seconds"
+  },
+  {
+    "name": "soc-tier2-opencti-elasticsearch-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-rabbitmq-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "cassandra",
+    "state": "running",
+    "status": "Up 14 seconds"
+  },
+  {
+    "name": "soc-tier2-opencti-redis-1",
+    "state": "running",
+    "status": "Up About an hour"
+  },
+  {
+    "name": "soc-tier2-opencti-minio-1",
+    "state": "running",
+    "status": "Up About an hour"
+  }
+]

@@ -72,6 +72,7 @@ class Incident(BaseModel):
     status: str = "pending" # pending, analyzing, completed
     risk_score: int = 0
     narrative: str = ""
+    rca: str = ""
     mitre_tactic: str = ""
     attack_stage: str = ""
     threat_intel_indicators: List[str] = []
