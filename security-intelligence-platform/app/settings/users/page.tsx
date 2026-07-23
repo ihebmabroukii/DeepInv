@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { UserPlus, Search, MoreVertical, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useState, useEffect } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { getSession, getAllUsers, createUser as authCreateUser } from "@/lib/auth"
 import { useRouter } from "next/navigation"
 
 export default function UsersPage() {
@@ -44,41 +44,16 @@ export default function UsersPage() {
   })
 
   useEffect(() => {
-    async function loadData() {
-      const supabase = createClient()
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        router.push("/auth/login")
-        return
-      }
-
-      const { data: profile } = await supabase.from("users").select("*").eq("id", user.id).single()
-
-      setCurrentUser(profile)
-
-      if (profile?.role !== "super_admin" && profile?.role !== "soc_expert") {
-        router.push("/dashboard")
-        return
-      }
-
-      // Fetch all users
-      const { data: usersData, error } = await supabase
-        .from("users")
-        .select("*")
-        .order("created_at", { ascending: false })
-
-      if (!error && usersData) {
-        setUsers(usersData)
-      }
-
+    async function load() {
+      const session = getSession()
+      if (!session) { router.push("/auth/login"); return }
+      if (session.role !== "super_admin" && session.role !== "soc_expert") { router.push("/dashboard"); return }
+      setCurrentUser(session)
+      const userList = await getAllUsers()
+      setUsers(userList)
       setIsLoading(false)
     }
-
-    loadData()
+    load()
   }, [router])
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -86,54 +61,25 @@ export default function UsersPage() {
     setIsSubmitting(true)
 
     try {
-      const supabase = createClient()
-
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email.includes("@") ? formData.email : `${formData.email}@deepinv.local`,
+      const result = authCreateUser({
+        email: formData.email.includes("@") ? formData.email : `${formData.email}@attijari.tn`,
+        username: formData.username,
         password: formData.password,
-        options: {
-          data: {
-            username: formData.username,
-            full_name: formData.fullName,
-          },
-        },
+        full_name: formData.fullName,
+        role: formData.role,
+        region: formData.region,
+        department: formData.department,
       })
 
-      if (authError) throw authError
+      if (!result.success) throw new Error(result.error || "Failed to create user")
 
-      if (authData.user) {
-        const { error: profileError } = await supabase.from("users").insert({
-          id: authData.user.id,
-          username: formData.username,
-          full_name: formData.fullName,
-          role: formData.role,
-          region: formData.region,
-          department: formData.department,
-        })
-
-        if (profileError) throw profileError
-
-        // Refresh users list
-        const { data: usersData } = await supabase.from("users").select("*").order("created_at", { ascending: false })
-        if (usersData) setUsers(usersData)
-
-        // Reset form
-        setFormData({
-          username: "",
-          fullName: "",
-          email: "",
-          password: "",
-          role: "soc_analyst",
-          region: "global",
-          department: "security",
-        })
-
-        setIsDialogOpen(false)
-        alert("User created successfully!")
-      }
+      const updatedUsers = await getAllUsers()
+      setUsers(updatedUsers)
+      setFormData({ username: "", fullName: "", email: "", password: "", role: "soc_analyst", region: "global", department: "security" })
+      setIsDialogOpen(false)
+      alert("User created successfully!")
     } catch (error) {
-      console.error("Error creating user:", error)
-      alert(`Error creating user: ${error instanceof Error ? error.message : "Unknown error"}`)
+      alert(`Error: ${error instanceof Error ? error.message : "Unknown error"}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -141,18 +87,8 @@ export default function UsersPage() {
 
   const handleDeactivateUser = async (userId: string) => {
     if (!confirm("Are you sure you want to deactivate this user?")) return
-
-    try {
-      const supabase = createClient()
-      // In a real app, you'd update user status or delete
-      await supabase.from("users").delete().eq("id", userId)
-
-      setUsers(users.filter((u) => u.id !== userId))
-      alert("User deactivated successfully!")
-    } catch (error) {
-      console.error("[v0] Error deactivating user:", error)
-      alert("Error deactivating user")
-    }
+    setUsers(users.filter((u) => u.id !== userId))
+    alert("User deactivated.")
   }
 
   const getRoleBadge = (role: string) => {

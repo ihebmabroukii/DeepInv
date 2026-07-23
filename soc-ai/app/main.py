@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import requests
 from app.core.config import settings
 from contextlib import asynccontextmanager
 from loguru import logger
@@ -86,7 +87,29 @@ async def read_dashboard(request: Request):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    ollama_ok = False
+    model_available = False
+    try:
+        resp = requests.get(f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1/models", timeout=2)
+        ollama_ok = resp.status_code == 200
+        if ollama_ok:
+            data = resp.json()
+            model_ids = []
+            if isinstance(data, dict) and isinstance(data.get("data"), list):
+                model_ids = [item.get("id") for item in data["data"] if isinstance(item, dict)]
+            elif isinstance(data, list):
+                model_ids = [item.get("id") for item in data if isinstance(item, dict)]
+            model_available = settings.AI_MODEL_NAME in model_ids or any(str(mid).startswith(settings.AI_MODEL_NAME + ":") for mid in model_ids if mid)
+    except Exception as e:
+        logger.warning(f"Ollama health check failed: {e}")
+
+    return {
+        "status": "healthy" if ollama_ok and model_available else "degraded",
+        "ollama_available": ollama_ok,
+        "ollama_model_ready": model_available,
+        "ollama_url": settings.OLLAMA_BASE_URL,
+        "ollama_model": settings.AI_MODEL_NAME,
+    }
 
 # Real-time WebSocket
 from app.api.ws import manager

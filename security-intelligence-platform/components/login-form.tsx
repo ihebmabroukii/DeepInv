@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Shield, Key } from "lucide-react"
+import { AttijariLogo } from "@/components/AttijariLogo"
 
 export function LoginForm() {
   const router = useRouter()
@@ -25,12 +26,12 @@ export function LoginForm() {
   return (
     <Card className="w-full max-w-md relative z-10 border-border/50 bg-card/95 backdrop-blur">
       <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-4">
-          <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
-            <Shield className="h-8 w-8 text-primary" />
+        <div className="flex justify-center mb-6">
+          <div className="relative p-1 rounded-2xl bg-gradient-to-b from-orange-500/20 to-red-500/10 border border-orange-500/20 flex items-center justify-center backdrop-blur-xl shadow-2xl shadow-orange-500/10">
+            <AttijariLogo className="h-20 w-20 rounded-xl drop-shadow-[0_0_15px_rgba(249,115,22,0.5)]" />
           </div>
         </div>
-        <CardTitle className="text-2xl font-semibold">SecureBank SOC</CardTitle>
+        <CardTitle className="text-2xl font-semibold">Attijari CyberGuard</CardTitle>
         <CardDescription className="text-muted-foreground">Security Intelligence Platform</CardDescription>
       </CardHeader>
       <CardContent>

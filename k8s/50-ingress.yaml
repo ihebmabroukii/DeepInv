@@ -1,0 +1,55 @@
+# =============================================================================
+# Ingress: single entry point routing hostnames to the SOC dashboards & API.
+# Requires an ingress controller (e.g. ingress-nginx). Add these hosts to
+# /etc/hosts pointing at the ingress IP for local testing.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: soc-ingress
+  namespace: soc
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: soc-ai.local
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: soc-ai, port: { number: 8000 } } } }
+    - host: wazuh.local
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: wazuh-dashboard, port: { number: 5601 } } } }
+    - host: thehive.local
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: thehive, port: { number: 9000 } } } }
+    - host: cortex.local
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: cortex, port: { number: 9001 } } } }
+    - host: opencti.local
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: opencti, port: { number: 8080 } } } }
+---
+# Horizontal autoscaling for the stateless AI API — a Kubernetes-only capability
+# (Docker Compose cannot do this). Scales soc-ai on CPU load.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: soc-ai
+  namespace: soc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: soc-ai
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

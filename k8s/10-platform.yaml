@@ -1,0 +1,174 @@
+# =============================================================================
+# Web platform tier: PostgreSQL, Flask backend, Nginx reverse proxy.
+# Mirrors ./docker-compose.yml
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: soc
+  labels: { app: db, tier: platform }
+spec:
+  selector: { app: db }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: soc
+  labels: { app: db, tier: platform }
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels: { app: db }
+  template:
+    metadata:
+      labels: { app: db, tier: platform }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: POSTGRES_DB } }
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "admin"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+  volumeClaimTemplates:
+    - metadata: { name: postgres-data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: soc
+  labels: { app: backend, tier: platform }
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: soc
+  labels: { app: backend, tier: platform }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend, tier: platform }
+    spec:
+      containers:
+        - name: backend
+          # Build & push from ./security-intelligence-platform-backend, then set this image
+          image: ghcr.io/ihebmabroukii/security-platform-backend:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: FLASK_APP
+              value: "run.py"
+            - name: FLASK_ENV
+              value: "production"
+            - name: LOCAL_DB_URL
+              value: "postgresql://admin:$(POSTGRES_PASSWORD)@db:5432/security_platform"
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: POSTGRES_PASSWORD } }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: soc
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events { worker_connections 1024; }
+    http {
+      upstream backend { server backend:5000; }
+      server {
+        listen 443 ssl;
+        ssl_certificate     /etc/nginx/certs/tls.crt;
+        ssl_certificate_key /etc/nginx/certs/tls.key;
+        location / {
+          proxy_pass http://backend;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: soc
+  labels: { app: nginx, tier: platform }
+spec:
+  type: LoadBalancer          # use `minikube tunnel` locally, or an external LB
+  selector: { app: nginx }
+  ports:
+    - port: 443
+      targetPort: 443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: soc
+  labels: { app: nginx, tier: platform }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: nginx }
+  template:
+    metadata:
+      labels: { app: nginx, tier: platform }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 443
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: certs
+              mountPath: /etc/nginx/certs
+              readOnly: true
+      volumes:
+        - name: nginx-conf
+          configMap: { name: nginx-conf }
+        - name: certs
+          secret:
+            secretName: nginx-tls
+            optional: true      # create with: kubectl -n soc create secret tls nginx-tls --cert=... --key=...

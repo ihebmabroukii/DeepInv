@@ -1,4 +1,4 @@
-# ✅ AGENT CONNECTION VERIFICATION CHECKLIST
+﻿# ✅ AGENT CONNECTION VERIFICATION CHECKLIST
 # Run this to verify everything is working before creating a new agent
 
 Write-Host "=== DeepInv Agent System Health Check ===" -ForegroundColor Cyan
@@ -46,7 +46,7 @@ Write-Host ""
 # 4. Check Database Connection
 Write-Host "[4/5] Checking Database..." -ForegroundColor Yellow
 try {
-    $dbCheck = docker exec security_platform_db psql -U admin -d security_platform -c "SELECT 1;" 2>&1
+    $dbCheck = docker exec security_platform_db psql -U admin -d security_platform -c 'SELECT 1;' 2>&1
     if ($dbCheck -match "1 row") {
         Write-Host "  ✓ Database is accessible" -ForegroundColor Green
     }

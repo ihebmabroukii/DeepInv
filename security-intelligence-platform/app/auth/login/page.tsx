@@ -1,153 +1,145 @@
 "use client"
 
 import type React from "react"
-
-import { createClient } from "@/lib/supabase/client"
-import { Button } from "@/components/ui/button"
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useRouter } from "next/navigation"
-import { useState } from "react"
-import { Shield } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { signIn } from "@/lib/auth"
+import { Shield, Lock, User, AlertCircle } from "lucide-react"
+import { AttijariLogo } from "@/components/AttijariLogo"
 
 export default function LoginPage() {
-  const [username, setUsername] = useState("")
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
-    console.log("[v0] Login attempt for username:", username)
-
     try {
-      const cleanUsername = username.trim()
-      const cleanPassword = password.trim()
+      const { user, error: authError } = await signIn(email.trim(), password.trim())
 
-      // Use the entered value as email
-      const email = cleanUsername
-
-      console.log("[v0] Attempting login with email:", email)
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: cleanPassword,
-      })
-
-      if (error) {
-        console.log("[v0] Auth error:", error)
-        // Check if it's an invalid credentials error
-        if (error.message.includes("Invalid login credentials")) {
-          throw new Error("Invalid credentials. Please ensure you have created the account and verified your email if required.")
-        }
-        if (error.message.includes("Email not confirmed")) {
-          throw new Error("Please verify your email address before logging in.")
-        }
-        throw error
+      if (authError || !user) {
+        setError(authError || "Authentication failed.")
+        return
       }
 
-      console.log("[v0] Login successful, fetching user profile")
-
-      const { data: profile, error: profileError } = await supabase
-        .from("users")
-        .select("role, username")
-        .eq("id", data.user.id)
-        .single()
-
-      if (profileError || !profile) {
-        console.log("[v0] Profile error:", profileError)
-        throw new Error("User profile not found. Please contact administrator.")
-      }
-
-      console.log("[v0] User profile found:", profile)
-
-      // Use window.location.href to ensure a full page load and update of auth state
+      // Full page reload so AuthProvider reads the new session from localStorage
       window.location.href = "/dashboard"
-    } catch (error: unknown) {
-      console.error("Login error:", error)
-      setError(error instanceof Error ? error.message : "Invalid credentials")
+    } catch (err) {
+      setError("An unexpected error occurred. Please try again.")
     } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 light:from-slate-50 light:via-slate-100 light:to-slate-200">
-      <div className="w-full max-w-md p-6">
-        <div className="mb-8 flex flex-col items-center gap-2">
-          <div className="flex items-center gap-2">
-            <Shield className="h-10 w-10 text-emerald-500" />
-            <h1 className="text-3xl font-bold text-white dark:text-white light:text-slate-900">DeepInv</h1>
+    <div className="flex min-h-screen items-center justify-center relative overflow-hidden bg-[#0a0a0f]">
+      {/* Background gradient effects */}
+      <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 via-transparent to-red-900/10" />
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-500/5 rounded-full blur-3xl" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-red-500/5 rounded-full blur-3xl" />
+
+      <div className="w-full max-w-md p-6 relative z-10">
+        {/* Logo & Branding */}
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="p-2 rounded-2xl bg-gradient-to-b from-orange-500/20 to-red-500/10 border border-orange-500/20 backdrop-blur-xl shadow-2xl shadow-orange-500/10">
+            <AttijariLogo className="h-16 w-16 rounded-xl drop-shadow-[0_0_15px_rgba(249,115,22,0.5)]" />
           </div>
-          <p className="text-sm text-slate-400 dark:text-slate-400 light:text-slate-600">
-            Security Intelligence Platform
-          </p>
+          <div className="text-center">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">
+              Attijari CyberGuard
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">Security Operations Center</p>
+          </div>
         </div>
 
-        <Card className="border-slate-700 bg-slate-900/50 backdrop-blur dark:border-slate-700 dark:bg-slate-900/50 light:border-slate-300 light:bg-white">
-          <CardHeader>
-            <CardTitle className="text-2xl text-white dark:text-white light:text-slate-900">Sign In</CardTitle>
-            <CardDescription className="text-slate-400 dark:text-slate-400 light:text-slate-600">
+        <Card className="border-orange-500/10 bg-card/80 backdrop-blur-xl shadow-2xl">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-xl flex items-center gap-2">
+              <Shield className="h-5 w-5 text-orange-500" />
+              Secure Sign In
+            </CardTitle>
+            <CardDescription>
               Enter your credentials to access the platform
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin}>
-              <div className="flex flex-col gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="username" className="text-slate-200 dark:text-slate-200 light:text-slate-700">
-                    Email Address
-                  </Label>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email or Username</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    id="username"
+                    id="email"
                     type="text"
-                    placeholder="Enter email address"
+                    placeholder="admin@attijari.tn"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-9 bg-background/50 border-orange-500/10 focus:border-orange-500/40"
                     required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="border-slate-700 bg-slate-800 text-white dark:border-slate-700 dark:bg-slate-800 dark:text-white light:border-slate-300 light:bg-white light:text-slate-900"
+                    autoComplete="username"
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="password" className="text-slate-200 dark:text-slate-200 light:text-slate-700">
-                    Password
-                  </Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="password"
                     type="password"
-                    required
+                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="border-slate-700 bg-slate-800 text-white dark:border-slate-700 dark:bg-slate-800 dark:text-white light:border-slate-300 light:bg-white light:text-slate-900"
+                    className="pl-9 bg-background/50 border-orange-500/10 focus:border-orange-500/40"
+                    required
+                    autoComplete="current-password"
                   />
                 </div>
-                {error && (
-                  <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3">
-                    <p className="text-sm text-red-400">{error}</p>
-                  </div>
-                )}
-                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
-                  {isLoading ? "Signing in..." : "Sign In"}
-                </Button>
-                <div className="text-center space-y-2">
-                  <p className="text-xs text-slate-500">First time? Set up the super admin account</p>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="text-emerald-400 hover:text-emerald-300 h-auto p-0"
-                    onClick={() => router.push("/auth/setup-admin")}
-                  >
-                    Create Super Admin Account
-                  </Button>
-                </div>
               </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+                  <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-destructive">{error}</p>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white border-0 mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Authenticating...
+                  </span>
+                ) : (
+                  "Sign In"
+                )}
+              </Button>
             </form>
+
+            <div className="mt-6 p-3 rounded-lg bg-muted/30 border border-border/50">
+              <p className="text-xs text-muted-foreground font-semibold mb-2">Demo Credentials:</p>
+              <div className="space-y-1 text-xs font-mono text-muted-foreground">
+                <p>👑 <span className="text-orange-400">admin@attijari.tn</span> / admin123</p>
+                <p>🛡️ <span className="text-blue-400">expert@attijari.tn</span> / expert123</p>
+                <p>🔍 <span className="text-green-400">analyst@attijari.tn</span> / analyst123</p>
+              </div>
+            </div>
+
+            <div className="mt-4 text-center text-xs text-muted-foreground">
+              <p>🔒 Bank-Grade Security • JWT Authenticated</p>
+            </div>
           </CardContent>
         </Card>
       </div>

@@ -1,4 +1,4 @@
-# SecureBank SOC - Security Intelligence Platform User Guide
+# Attijari CyberGuard User Guide
 
 ## Getting Started
 

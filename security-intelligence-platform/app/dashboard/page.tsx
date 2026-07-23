@@ -1,10 +1,17 @@
+"use client"
+
 import { DashboardShell } from "@/components/dashboard-shell"
+import { RequireAuth } from "@/components/require-auth"
 import { OverviewDashboard } from "@/components/overview-dashboard"
 
-export default async function DashboardPage() {
+export default function DashboardPage() {
   return (
-    <DashboardShell userRole="super_admin">
-      <OverviewDashboard />
-    </DashboardShell>
+    <RequireAuth>
+      {(user) => (
+        <DashboardShell userRole={user.role}>
+          <OverviewDashboard />
+        </DashboardShell>
+      )}
+    </RequireAuth>
   )
 }

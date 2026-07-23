@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import {
   LayoutDashboard,
@@ -15,17 +15,16 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Building2,
-  Search,
   User,
-  ChevronDown,
   Users,
   ShieldCheck,
-  Bot,
+  MessageSquare,
+  Bell,
+  Fingerprint,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { useGetIncidents } from "@/lib/api"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,38 +34,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { createClient } from "@/lib/supabase/client"
+import { signOut } from "@/lib/auth"
+import { useAuth } from "@/components/auth-provider"
+import { AttijariLogo } from "@/components/AttijariLogo"
 
 const navigation = [
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard, section: "main" },
   { name: "Assets & Trust", href: "/assets", icon: Shield, section: "main" },
   { name: "Security Events", href: "/events", icon: AlertTriangle, section: "main" },
+  { name: "Raw Alerts", href: "/alerts", icon: Bell, section: "main" },
   { name: "Rules & Automation", href: "/rules", icon: Workflow, section: "main" },
   { name: "AI Insights", href: "/ai-insights", icon: Brain, section: "main" },
+  { name: "UEBA", href: "/ueba", icon: Fingerprint, section: "main" },
+  { name: "SOC Copilot", href: "/copilot", icon: MessageSquare, section: "main" },
   { name: "Timeline", href: "/timeline", icon: Clock, section: "main" },
   { name: "Audit Log", href: "/audit", icon: FileText, section: "bottom", superAdminOnly: true },
   { name: "Reports", href: "/reports", icon: FileText, section: "bottom" },
   { name: "Users", href: "/settings/users", icon: Users, section: "bottom", adminOnly: true },
-  { name: "Agents", href: "/admin/agents", icon: Bot, section: "bottom", superAdminOnly: true },
   { name: "Roles", href: "/admin/roles", icon: ShieldCheck, section: "bottom", superAdminOnly: true },
   { name: "Settings", href: "/settings", icon: Settings, section: "bottom" },
-]
-
-const regions = [
-  { value: "global", label: "Global SOC" },
-  { value: "us_east", label: "US East" },
-  { value: "us_west", label: "US West" },
-  { value: "eu_central", label: "EU Central" },
-  { value: "asia_pacific", label: "Asia Pacific" },
-]
-
-const departments = [
-  { value: "all", label: "All Departments" },
-  { value: "security", label: "Security Department" },
-  { value: "financial", label: "Financial Department" },
-  { value: "hr", label: "HR Department" },
-  { value: "it", label: "IT Department" },
-  { value: "operations", label: "Operations Department" },
 ]
 
 interface DashboardShellProps {
@@ -76,8 +62,6 @@ interface DashboardShellProps {
 
 export function DashboardShell({ children, userRole }: DashboardShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [selectedRegion, setSelectedRegion] = useState("global")
-  const [selectedDepartment, setSelectedDepartment] = useState("all")
   const [isMounted, setIsMounted] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
@@ -87,7 +71,18 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
     setIsMounted(true)
   }, [])
 
-  const riskStatus = "orange" // Mock risk status
+  // Global risk level derived from live incidents (highest active threat).
+  const { data: incidents } = useGetIncidents()
+  const riskStatus = useMemo(() => {
+    const list = (incidents as any[]) || []
+    if (list.length === 0) return "green"
+    const maxRisk = Math.max(...list.map((i) => i.aiConfidence ?? i.risk_score ?? 0))
+    const hasCritical = list.some((i) => i.severity === "critical")
+    if (maxRisk >= 80 || hasCritical) return "red"
+    if (maxRisk >= 60) return "orange"
+    if (maxRisk >= 40) return "yellow"
+    return "green"
+  }, [incidents])
 
   const getRiskColor = (status: string) => {
     switch (status) {
@@ -102,70 +97,21 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
     }
   }
 
+  const { user } = useAuth()
+
   const handleSignOut = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push("/auth/login")
-    router.refresh()
+    await signOut()
   }
 
   return (
     <div className="min-h-screen bg-background">
       {/* Top Bar */}
-      <header className="h-16 border-b border-border bg-card/50 backdrop-blur fixed top-0 left-0 right-0 z-40">
+      <header className="h-16 border-b border-border bg-card/50 backdrop-blur fixed top-0 left-0 right-0 z-40 print:hidden">
         <div className="h-full px-6 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Shield className="h-6 w-6 text-primary" />
-              <span className="font-semibold text-lg">DeepInv</span>
-            </div>
-
-            <div className="flex items-center gap-2 ml-8">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              {isMounted && (
-                <>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="secondary" size="sm" className="gap-2">
-                        {regions.find((r) => r.value === selectedRegion)?.label}
-                        <ChevronDown className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      <DropdownMenuLabel>Select Region</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {regions.map((region) => (
-                        <DropdownMenuItem key={region.value} onClick={() => setSelectedRegion(region.value)}>
-                          {region.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="secondary" size="sm" className="gap-2">
-                        {departments.find((d) => d.value === selectedDepartment)?.label}
-                        <ChevronDown className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      <DropdownMenuLabel>Select Department</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {departments.map((dept) => (
-                        <DropdownMenuItem key={dept.value} onClick={() => setSelectedDepartment(dept.value)}>
-                          {dept.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Environment:</span>
-              <div className="bg-background border border-border rounded px-2 py-1 text-xs font-mono">Production</div>
+            <div className="flex items-center gap-3">
+              <AttijariLogo className="h-9 w-9 drop-shadow-[0_0_8px_rgba(249,115,22,0.5)] rounded" />
+              <span className="font-semibold text-lg bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">Attijari CyberGuard</span>
             </div>
           </div>
 
@@ -176,12 +122,6 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
               <div className={cn("px-3 py-1 rounded text-xs font-medium uppercase", getRiskColor(riskStatus))}>
                 {riskStatus}
               </div>
-            </div>
-
-            {/* Search */}
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search assets, events..." className="pl-9 bg-background border-border" />
             </div>
 
             {/* Theme Toggle */}
@@ -212,7 +152,7 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-16 bottom-0 border-r border-border bg-sidebar transition-all duration-300 z-30",
+          "fixed left-0 top-16 bottom-0 border-r border-border bg-sidebar transition-all duration-300 z-30 print:hidden",
           sidebarCollapsed ? "w-16" : "w-64",
         )}
       >
@@ -284,7 +224,7 @@ export function DashboardShell({ children, userRole }: DashboardShellProps) {
       </aside>
 
       {/* Main Content */}
-      <main className={cn("pt-16 min-h-screen transition-all duration-300", sidebarCollapsed ? "pl-16" : "pl-64")}>
+      <main className={cn("pt-16 min-h-screen transition-all duration-300 print:pl-0 print:pt-0", sidebarCollapsed ? "pl-16" : "pl-64")}>
         <div className="p-6">{children}</div>
       </main>
     </div>

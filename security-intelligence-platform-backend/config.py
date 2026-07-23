@@ -8,7 +8,7 @@ class Config:
     SUPABASE_URL = os.getenv('SUPABASE_URL')
     SUPABASE_KEY = os.getenv('SUPABASE_KEY')
     USE_LOCAL_DB = os.getenv('USE_LOCAL_DB', 'True') == 'True'
-    LOCAL_DB_URL = os.getenv('LOCAL_DB_URL', 'postgresql://admin:REDACTED@localhost:5432/security_platform')
+    LOCAL_DB_URL = os.getenv('LOCAL_DB_URL', 'postgresql://admin:change_me@localhost:5432/security_platform')
     DEBUG = os.getenv('FLASK_DEBUG', 'False') == 'True'
     SWAGGER = {
         'title': 'Security Intelligence Platform API',

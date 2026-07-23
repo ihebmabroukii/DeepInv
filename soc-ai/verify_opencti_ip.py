@@ -1,10 +1,11 @@
 import asyncio
 import aiohttp
 import json
+import os
 
 # USING DYNAMIC HOSTNAME
 OPENCTI_URL = "http://opencti:8080/graphql"
-OPENCTI_TOKEN = "REDACTED"
+OPENCTI_TOKEN = os.getenv("OPENCTI_TOKEN", "")
 
 async def test_opencti():
     print(f"🚀 Testing Connection to {OPENCTI_URL}...")

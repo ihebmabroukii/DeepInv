@@ -1,139 +1,114 @@
-# Security Intelligence Platform
+# AI-Driven SOC Platform
 
-A comprehensive security intelligence dashboard and management platform featuring a modern Next.js frontend and a robust Flask backend with a Dual-Database architecture (Local PostgreSQL & Remote Supabase).
+An end-to-end Security Operations Center that combines a classic SIEM / threat-intelligence stack with a **local, air-gapped LLM analysis engine**. Alerts flow from Wazuh, Suricata and Security Onion into a LangGraph multi-agent pipeline that triages, enriches, correlates and explains them — then opens cases in TheHive and renders everything in a React dashboard.
 
-## 🚀 Overview
+Built as a final-year engineering project (PFE) deployed in a banking environment, where data sovereignty was a hard requirement: **all AI inference runs locally on Ollama/Mistral — no data ever leaves the infrastructure.**
 
-The Security Intelligence Platform is designed to provide real-time insights and management capabilities for security operations. It consists of three main components:
+![AI engine architecture](ai_engine_architecture_v2.png)
 
--   **Frontend**: A responsive dashboard built with **Next.js 16**, **Tailwind CSS 4**, and **Radix UI**.
--   **Backend**: A RESTful API built with **Flask**, serving as the orchestration layer for agents and data.
--   **Database**: 
-    -   **Default**: Local **PostgreSQL** running in Docker for streamlined development and data sovereignty.
-    -   **Optional**: Cloud **Supabase** mode for production deployments.
+## Highlights
 
-## 🛠️ Technology Stack
+- **Multi-agent AI triage (LangGraph)** — autonomous L1/L2 alert handling modelled on real SOC analyst workflows: normalization, enrichment, MITRE ATT&CK mapping, root-cause analysis and response proposals.
+- **RAG-powered forensics** — natural-language search over archived logs and threat-intel documents during live investigations.
+- **Prompt-injection defence** — a dedicated multi-agent guard in front of the LLM engine, protecting it from adversarial input embedded in log data.
+- **Air-gapped local LLM** — Ollama + Mistral on GPU; zero external API calls.
+- **Full SOC toolstack** — Wazuh (SIEM/EDR), Suricata IDS, Security Onion, TheHive + Cortex case management, OpenCTI + MISP threat intel, ModSecurity WAF, WireGuard VPN.
+- **UEBA & insider-threat detection** — behavioural baselines with anomaly scoring and separated learning/detection phases.
+- **Kill-chain & campaign correlation** — alerts grouped into attack campaigns with reconstructed timelines.
+- **Two deployment modes** — Docker Compose (per tier) or Kubernetes ([`k8s/`](k8s/), 53 resources, one-command deploy).
 
-### Frontend (`/security-intelligence-platform`)
--   **Framework**: [Next.js 16](https://nextjs.org/) (React 19)
--   **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
--   **UI Components**: [Radix UI](https://www.radix-ui.com/) & [Lucide React](https://lucide.dev/) (Icons)
--   **Network**: [TanStack Query](https://tanstack.com/query)
--   **Validation**: [Zod](https://zod.dev/)
+## Architecture
 
-### Backend (`/security-intelligence-platform-backend`)
--   **Framework**: [Flask](https://flask.palletsprojects.com/)
--   **Database Driver**: [PsychoPG2](https://pypi.org/project/psycopg2/) (PostgreSQL)
--   **API Documentation**: [Flasgger](https://github.com/flasgger/flasgger) (Swagger UI)
--   **Mode**: Dual-DB Support (Auto-switches between Local Postgres and Cloud Supabase)
+The platform is organised in tiers, each independently deployable:
 
-### Infrastructure
--   **Docker**: Containerized PostgreSQL database.
+| Tier | Directory | Components |
+|------|-----------|------------|
+| **Tier 1 — Detection** | [`soc-tier1/`](soc-tier1/) | Wazuh manager / indexer / dashboard, ModSecurity WAF, WireGuard VPN, Filebeat |
+| **Tier 2 — Intel & cases** | [`soc-tier2/`](soc-tier2/) | TheHive (+ Cassandra, Elasticsearch), Cortex analyzers, OpenCTI (+ workers, MITRE & TheHive connectors) |
+| **AI Engine** | [`soc-ai/`](soc-ai/) | FastAPI service, LangGraph multi-agent pipeline, Celery workers, Redis, Ollama (Mistral, GPU) |
+| **Dashboard** | [`security-intelligence-platform/`](security-intelligence-platform/) | Next.js 16 / React 19 frontend: overview, security events, MITRE view, UEBA, copilot chat, reporting |
+| **Backend API** | [`security-intelligence-platform-backend/`](security-intelligence-platform-backend/) | Flask REST API, PostgreSQL, RBAC & audit logging — setup guide in [`docs/web-platform.md`](docs/web-platform.md) |
+| **Kubernetes** | [`k8s/`](k8s/) | Manifests for the whole platform (StatefulSets, GPU scheduling, Ingress, HPA) — see [`k8s/README.md`](k8s/README.md) |
+| **Victim lab** | [`victim-lab/`](victim-lab/) | Containerized target used for attack simulations |
 
-## 📋 Prerequisites
+![Ingestion pipeline](ingestion_pipeline.png)
 
--   [Node.js](https://nodejs.org/) (Latest LTS)
--   [Python](https://www.python.org/) (3.8+)
--   [Docker & Docker Compose](https://www.docker.com/)
+## Screenshots
 
-## 📦 Installation & Setup
+| Overview | AI Insight |
+|---|---|
+| ![Overview](screenshots/overview.png) | ![AI insight](screenshots/AI%20insight.png) |
 
-1.  **Clone the repository**:
-    ```bash
-    git clone <repository-url>
-    cd DeepInv
-    ```
+| MITRE ATT&CK mapping | UEBA |
+|---|---|
+| ![MITRE](screenshots/mittre%20attack%20page%20.png) | ![UEBA](screenshots/ubea.png) |
 
-2.  **Start the Database (Docker)**:
-    This will spin up a local PostgreSQL instance on port 5432.
-    ```bash
-    docker-compose up -d
-    ```
+More in [`screenshots/`](screenshots/).
 
-3.  **Install Frontend Dependencies**:
-    ```bash
-    cd security-intelligence-platform
-    npm install
-    ```
+## Quick start (Docker Compose)
 
-4.  **Install Backend Dependencies**:
-    ```bash
-    cd ../security-intelligence-platform-backend
-    pip install -r requirements.txt
-    ```
+Each tier has its own compose file. Bring them up in order:
 
-## 🏃‍♂️ Running the Project
-
-To ensure stability, please run the Backend and Frontend in **separate terminals**.
-
-### Terminal 1: Backend
 ```bash
-cd security-intelligence-platform-backend
-python run.py
+# 0. configure secrets — never commit .env files
+cp .env.example .env                  # web platform (Postgres)
+cp soc-ai/.env.example soc-ai/.env    # AI engine (Wazuh/OpenCTI/Cortex credentials)
+cp soc-tier1/.env.example soc-tier1/.env
+
+# 1. detection tier (Wazuh, WAF, VPN)
+docker compose -f soc-tier1/docker-compose.yml up -d
+
+# 2. intel tier (TheHive, Cortex, OpenCTI)
+docker compose -f soc-tier2/docker-compose.yml up -d
+
+# 3. AI engine (FastAPI + Celery + Redis + Ollama)
+docker compose -f soc-ai/docker-compose.yml up -d
+docker exec ollama ollama pull mistral:latest
+
+# 4. web platform (dashboard backend + Postgres + Nginx)
+docker compose up -d
+cd security-intelligence-platform && npm install && npm run dev
 ```
-> The backend will- **Hosts File**: For best results, map `127.0.0.1 platform.bank.tn` in your `/etc/hosts` or `C:\Windows\System32\drivers\etc\hosts`.
 
-## 🧠 System Architecture & Data Flow
+GPU inference requires the NVIDIA container runtime (tested on an RTX 4070 SUPER, 12 GB).
 
-High-level overview of the secure agent communication implementation.
+## Quick start (Kubernetes)
 
-### 🛡️ Components
-1.  **Nginx (Reverse Proxy)**: Acts as the **mTLS Gatekeeper**. Listens on Port 443 (SSL).
-    *   **Public Access**: `/api/v1/agents/bootstrap` (One-way TLS) and `/static/` (Install Scripts).
-    *   **Restricted Access**: All other routes (e.g., `/verify`, `/heartbeat`) REQUIRE a valid Client Certificate signed by our internal CA.
-2.  **Backend (Flask)**:
-    *   **PKI Manager**: `app/pki.py` handles Certificate Authority (CA) generation and signs Client Certificates.
-    *   **Trust Verification**: Checks Nginx Headers (`X-Client-Verified`) and validates Time Drift.
-3.  **Agent (PowerShell/Bash)**:
-    *   Starts with an **Install Token**.
-    *   Bootstraps via HTTPs to fetch its unique **Client Certificate**.
-    *   Uses this Certificate for all future communication (Heartbeats, Tasks).
-
-### 🔄 Data Flow: The "Bootstrap" Process
-1.  **Admin** creates Agent -> Backend generates `Install Token`.
-2.  **Admin** runs `install.ps1` on Target Machine.
-3.  **Agent** downloads script from Nginx (`/static/`).
-4.  **Agent** calls `POST /bootstrap` with `Token`.
-5.  **Backend** validates Token -> Issues `client.crt` + `client.key`.
-6.  **Agent** saves Certs locally.
-7.  **Agent** switches to **mTLS Mode**.
-8.  **Agent** calls `POST /heartbeat` proving its identity.
-9.  **Nginx** validates Cert -> Forwards to Backend -> Status becomes **Active**.
-
-### Terminal 2: Frontend
 ```bash
-cd security-intelligence-platform
-npm run dev
+kubectl apply -k k8s/
+kubectl -n soc get pods
 ```
-> The frontend will start on `http://localhost:3000` and automatically proxy requests to the backend.
 
--   **Frontend**: `http://localhost:3000`
--   **Backend**: `http://localhost:5000`
--   **API Docs**: `http://localhost:5000/apidocs`
--   **Database**: `localhost:5432` (User: `admin`, Pass: `REDACTED`, DB: `security_platform`)
+See [`k8s/README.md`](k8s/README.md) for prerequisites (StorageClass, ingress controller, NVIDIA device plugin) and a Compose → Kubernetes mapping.
 
-### Environment Configuration
+## Attack simulation & demos
 
-The backend auto-detects the database mode. To switch to Cloud Supabase, edit `security-intelligence-platform-backend/config.py` or set the env var:
--   `USE_LOCAL_DB=False`
+The repo ships with reproducible attack scenarios used to exercise the full pipeline end-to-end (attack → detection → AI triage → case → report):
 
-## 🧠 Advanced Features
+- `demo_apt29_attack.py` — multi-stage APT emulation mapped to MITRE techniques
+- `demo_ueba_attack.py` — insider-threat scenario against the UEBA baselines
+- `soc-ai/simulate_bruteforce.py`, `simulate_escalation.py`, … — targeted single-scenario injects
+- [`victim-lab/`](victim-lab/) — the containerized victim endpoint
 
-### Pro Agent Management
-The platform includes an enterprise-grade **Agent Creation Wizard**:
--   **Multi-Platform Support**: Endpoint, Network Sensor, Cloud VM, Kubernetes.
--   **Trust Configuration**: Enforce mTLS, Hardware Binding, and Auto-Revocation policies.
--   **Secure Enrollment**: Generates single-use, time-limited install commands for Linux and Windows.
+## Security notes
 
-### Database Architecture
-The backend uses a custom adapter pattern to seamlessly switch between local PostgreSQL and remote Supabase without changing business logic.
--   **Local Mode**: Uses `psycopg2` to talk to Dockerized Postgres.
--   **Cloud Mode**: Uses `supabase-py` HTTP client.
+- **No secrets in the repo.** All credentials come from environment variables / `.env` files (gitignored). Start from the provided `.env.example` files.
+- TLS certificates, private keys and VPN configuration are generated locally and are **not** tracked.
+- The Kubernetes `Secret` manifest ships placeholder values only; create real secrets at deploy time (`kubectl create secret ...`).
+- This is a lab/PFE platform. Before any production use: rotate every credential, enable TLS verification where disabled, and review WAF/ingress exposure.
 
-## 🤝 Contributing
+## Tech stack
 
-1.  Fork the repository.
-2.  Create a feature branch.
-3.  Commit your changes.
-4.  Push to video branch.
-5.  Open a Pull Request.
+**Security:** Wazuh · Suricata · Security Onion · TheHive · Cortex · OpenCTI · MISP · ModSecurity · WireGuard
+**AI:** LangGraph · LangChain · RAG · Ollama (Mistral) · custom prompt-injection defence
+**Platform:** FastAPI · Celery · Redis · Flask · PostgreSQL · Next.js 16 · React 19 · Tailwind 4
+**Infra:** Docker Compose · Kubernetes · Nginx · GPU inference (NVIDIA)
+
+## Author
+
+**Iheb Mabrouki** — Cybersecurity Engineer
+[LinkedIn](https://www.linkedin.com/in/iheb-mabrouki) · [GitHub](https://github.com/ihebmabroukii) · ihebmabrouki2702@gmail.com
+
+## License
+
+See [LICENSE](LICENSE).

@@ -12,24 +12,32 @@ async def main():
     print("💉 Injecting MOCK Incident with Threat Intel...")
     
     incident = Incident(
-        id=f"inc-TEST-{int(datetime.now().timestamp())}",
-        source_ip="99.99.99.99",
+        id=f"inc-BF-{int(datetime.now().timestamp())}",
+        source_ip="172.126.230.141",
         alerts=[
             NormalizedAlert(
-                alert_id="test-alert-1",
+                alert_id="test-alert-bf-1",
                 timestamp=datetime.now(timezone.utc),
-                source_system="manual_test",
-                name="Simulated Cobalt Strike Beacon",
-                severity=SeverityEnum.CRITICAL
+                source_system="wazuh",
+                name="SSHD Authentication Success after Brute Force",
+                severity=SeverityEnum.CRITICAL,
+                src_ip="172.126.230.141",
+                description="Accepted password for user root from 172.126.230.141 port 50010 ssh2"
             )
         ],
         created_at=datetime.now(timezone.utc),
-        status="closed",
-        risk_score=99,
-        narrative="[TEST] This incident simulates a confirmed positive from OpenCTI. The AI has correlated the traffic with known C2 infrastructure.",
-        mitre_tactic="Command and Control",
-        attack_stage="Actions on Objectives",
-        threat_intel_indicators=["Cobalt-Strike", "APT29-Tool", "Malicious-SSL"]
+        status="analyzed",
+        risk_score=95,
+        narrative="The attacker at 172.126.230.141 performed an automated SSH dictionary attack targeting the 'admin' and 'root' accounts. After 10 failed attempts, they successfully authenticated as 'root', indicating a total system compromise.",
+        rca="Weak SSH password policies and lack of network rate-limiting allowed the adversary to rapidly guess credentials until successful.",
+        ai_reasoning="Risk score set to 95 (CRITICAL) because a brute force attack successfully resulted in a root-level login, representing an immediate threat of lateral movement and data exfiltration.",
+        ai_recommendations="1. Terminate the active SSH session for user 'root' from 172.126.230.141.\n2. Isolate the compromised host from the network.\n3. Reset all root credentials immediately.\n4. Implement Fail2Ban or strict rate-limiting on SSH port 22.",
+        predicted_next_steps="The attacker will likely deploy persistence mechanisms (like adding authorized_keys) or attempt to pivot into deeper network segments.",
+        mitre_tactic="Credential Access",
+        attack_stage="Exploitation",
+        cves_exploited=["CVE-2023-38408 (Potential OpenSSH Agent Forwarding)"],
+        exact_mitre_ttps=["T1110 (Brute Force)", "T1078 (Valid Accounts)"],
+        threat_intel={"opencti": ["IP flagged for Malicious SSH Scanning"], "cortex": [], "thehive": []}
     )
     
     # Save (pushes to Redis history)

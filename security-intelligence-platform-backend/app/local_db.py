@@ -156,7 +156,7 @@ class LocalQueryBuilder:
 class LocalClient:
     def __init__(self):
         # Default to the docker settings if env vars not set
-        self.db_url = Config.LOCAL_DB_URL or "postgresql://admin:REDACTED@localhost:5432/security_platform"
+        self.db_url = Config.LOCAL_DB_URL or "postgresql://admin:change_me@localhost:5432/security_platform"
         self._init_db()
 
     def _init_db(self):

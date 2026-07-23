@@ -1,0 +1,17 @@
+# Deploy the whole platform with:  kubectl apply -k k8s/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: soc
+
+resources:
+  - 00-namespace.yaml
+  - 01-config-secrets.yaml
+  - 10-platform.yaml
+  - 20-tier1-detection.yaml
+  - 30-tier2-intel.yaml
+  - 40-ai-engine.yaml
+  - 50-ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: soc-platform

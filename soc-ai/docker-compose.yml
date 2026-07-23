@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   soc-ai:
     build: .
@@ -8,19 +6,30 @@ services:
     restart: always
     ports:
       - "8001:8000"
-    command: /bin/bash -c "pip install celery redis pydantic && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       - WAZUH_API_URL=https://wazuh.manager:55000
-      - WAZUH_API_USER=wazuh
-      - WAZUH_API_PASSWORD=wazuh
+      - WAZUH_API_USER=${WAZUH_API_USER:?set in .env}
+      - WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD:?set in .env}
       - SURICATA_LOG_PATH=/var/log/suricata/eve.json
       - THEHIVE_URL=http://thehive:9000
+      - THEHIVE_PUBLIC_URL=http://localhost:9000
+      - THEHIVE_API_KEY=${THEHIVE_API_KEY:-}
       - REDIS_URL=redis://soc-ai-redis:6379/0
       - OLLAMA_BASE_URL=http://ollama:11434
-      - AI_MODEL_NAME=mistral
+      - AI_MODEL_NAME=mistral:latest
       # Dynamic Hostname (DNS Verified)
       - OPENCTI_URL=http://opencti:8080
-      - OPENCTI_TOKEN=REDACTED
+      - OPENCTI_TOKEN=${OPENCTI_TOKEN:?set in .env}
+      # Cortex: reachable via docker hostname; PUBLIC_URL is for browser links
+      - CORTEX_URL=http://cortex:9001
+      - CORTEX_PUBLIC_URL=http://localhost:9001
+      - CORTEX_API_KEY=${CORTEX_API_KEY:?set in .env}
+
+      # Security Onion Elasticsearch Polling
+      - SO_ELASTIC_URL=${SO_ELASTIC_URL:-https://security-onion.local:9200}
+      - SO_ELASTIC_USER=${SO_ELASTIC_USER:-so_elastic}
+      - SO_ELASTIC_PASS=${SO_ELASTIC_PASS:?set in .env}
     volumes:
       - soc-tier1_suricata-logs:/var/log/suricata:ro
       - soc-tier1_wazuh-logs:/var/ossec/logs:ro
@@ -36,18 +45,23 @@ services:
   celery_worker:
     build: .
     container_name: soc-ai-celery
-    command: /bin/bash -c "pip install celery redis pydantic && celery -A app.worker.celery_app worker --loglevel=info"
+    command: celery -A app.worker.celery_app worker --loglevel=info
     user: "0:0"
     restart: always
     environment:
       - REDIS_URL=redis://soc-ai-redis:6379/0
       - OLLAMA_BASE_URL=http://ollama:11434
-      - AI_MODEL_NAME=mistral
+      - AI_MODEL_NAME=mistral:latest
       - WAZUH_API_URL=https://wazuh.manager:55000
-      - WAZUH_API_USER=wazuh
-      - WAZUH_API_PASSWORD=wazuh
+      - WAZUH_API_USER=${WAZUH_API_USER:?set in .env}
+      - WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD:?set in .env}
       - OPENCTI_URL=http://opencti:8080
-      - OPENCTI_TOKEN=REDACTED
+      - OPENCTI_TOKEN=${OPENCTI_TOKEN:?set in .env}
+
+      # Security Onion Elasticsearch Polling
+      - SO_ELASTIC_URL=${SO_ELASTIC_URL:-https://security-onion.local:9200}
+      - SO_ELASTIC_USER=${SO_ELASTIC_USER:-so_elastic}
+      - SO_ELASTIC_PASS=${SO_ELASTIC_PASS:?set in .env}
     networks:
       - soc_net
     volumes:
@@ -60,11 +74,23 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
+    ports:
+      - "11434:11434"
     networks:
       - soc_net
     volumes:
       - ollama_data:/root/.ollama
     restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
   redis:
     image: redis/redis-stack-server:latest
@@ -73,6 +99,9 @@ services:
       - soc_net
     ports:
       - "6379:6379"
+    command: redis-stack-server --appendonly yes
+    volumes:
+      - redis_data:/data
     restart: always
 
 # Connect to the existing network defined in Tier 1 / Tier 2
@@ -87,3 +116,4 @@ volumes:
   soc-tier1_wazuh-logs:
     external: true
   ollama_data:
+  redis_data:

@@ -27,6 +27,8 @@ interface SecurityEvent {
   aiConfidence: number
   whatHappened: string
   aiReasoning: string
+  ipHistory?: string
+  mitre_tactic?: string
   remediation: {
     description: string
     commands: string[]
@@ -36,6 +38,7 @@ interface SecurityEvent {
 // Removed static events array in favor of dynamic fetching
 
 import { useGetIncidents } from "@/lib/api"
+import { IntegrationActions } from "./integration-actions"
 
 export function SecurityEventsView() {
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
@@ -239,6 +242,21 @@ export function SecurityEventsView() {
                           <p className="text-sm text-muted-foreground leading-relaxed text-pretty">{event.aiReasoning}</p>
                         </div>
 
+                        {/* IP Intelligence & History */}
+                        {event.ipHistory && (
+                          <div>
+                            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                              <Server className="h-4 w-4 text-primary" />
+                              IP Intelligence &amp; History
+                            </h4>
+                            <div className="bg-background border border-border rounded-lg p-4 text-xs">
+                              <pre className="text-muted-foreground whitespace-pre-wrap break-words font-mono leading-relaxed">
+                                {event.ipHistory}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Remediation */}
                         <div>
                           <div className="flex items-center justify-between mb-3">
@@ -265,6 +283,9 @@ export function SecurityEventsView() {
                             </pre>
                           </div>
                         </div>
+
+                        {/* External Integrations */}
+                        <IntegrationActions event={event} />
                       </div>
                     )}
                   </div>

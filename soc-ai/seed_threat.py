@@ -1,3 +1,4 @@
+import os
 import sys
 import subprocess
 
@@ -15,7 +16,7 @@ from datetime import datetime
 # Use localhost here because we are inside the container calling another container?
 # NO. Inside container 'soc-ai', we must use 'http://opencti:8080'
 API_URL = "http://opencti:8080"
-API_TOKEN = "REDACTED"
+API_TOKEN = os.getenv("OPENCTI_TOKEN", "")
 TARGET_IP = "172.126.230.141"
 
 def seed_data():

@@ -1,89 +1,154 @@
+"use client"
+
 import { DashboardShell } from "@/components/dashboard-shell"
+import { RequireAuth } from "@/components/require-auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { FileText, Download, Calendar, TrendingUp, AlertTriangle, Shield } from "lucide-react"
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
+import { useGetIncidents } from "@/lib/api"
+import { logAuditEvent } from "@/lib/auth"
+import { toast } from "sonner"
 
-export default async function ReportsPage() {
-  const supabase = await createClient()
+const SOC_API = "/soc-api"
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+function buildReportText(inc: any): string {
+  const line = "=".repeat(70)
+  const list = (v: any) => Array.isArray(v) && v.length ? v.map((x: string) => `  - ${x}`).join("\n") : "  (none)"
+  const ti = inc.threat_intel || {}
+  return [
+    line,
+    `  SECURITY INCIDENT REPORT — ${inc.id}`,
+    line,
+    `Generated      : ${new Date().toISOString()}`,
+    `Source IP      : ${inc.source_ip || "N/A"}`,
+    `Victim         : ${inc.victim_ip || "N/A"}`,
+    `Risk Score     : ${inc.risk_score ?? "N/A"} / 100`,
+    `Attack Stage   : ${inc.attack_stage || "N/A"}`,
+    `MITRE Tactic   : ${inc.mitre_tactic || "N/A"}`,
+    `Status         : ${inc.status || "N/A"}`,
+    `Alerts         : ${inc.alerts ? inc.alerts.length : 0}`,
+    "",
+    "NARRATIVE",
+    "-".repeat(70),
+    inc.narrative || "N/A",
+    "",
+    "ROOT CAUSE ANALYSIS",
+    "-".repeat(70),
+    inc.rca || "N/A",
+    "",
+    "AI REASONING",
+    "-".repeat(70),
+    inc.ai_reasoning || "N/A",
+    "",
+    "MITRE ATT&CK TTPs",
+    "-".repeat(70),
+    list(inc.exact_mitre_ttps),
+    "",
+    "UEBA BEHAVIORAL ANOMALIES",
+    "-".repeat(70),
+    list(inc.ueba_indicators),
+    "",
+    "BLAST RADIUS",
+    "-".repeat(70),
+    list(inc.blast_radius),
+    "",
+    "CVEs",
+    "-".repeat(70),
+    list(inc.cves_exploited),
+    "",
+    "PREDICTED NEXT STEPS",
+    "-".repeat(70),
+    inc.predicted_next_steps || "N/A",
+    "",
+    "AI RECOMMENDATIONS",
+    "-".repeat(70),
+    inc.ai_recommendations || "N/A",
+    "",
+    "RECOMMENDED PLAYBOOK",
+    "-".repeat(70),
+    inc.recommended_playbook || "N/A",
+    "",
+    "THREAT INTEL",
+    "-".repeat(70),
+    `  OpenCTI : ${(ti.opencti || []).join(", ") || "none"}`,
+    `  Cortex  : ${(ti.cortex || []).join(", ") || "none"}`,
+    `  TheHive : ${(ti.thehive || []).join(", ") || "none"}`,
+    line,
+  ].join("\n")
+}
 
-  if (!user) {
-    redirect("/auth/login")
+async function downloadLatestReport() {
+  const t = toast.loading("Generating latest report…")
+  try {
+    const res = await fetch(`${SOC_API}/api/v1/alerts/incidents`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const incidents = await res.json()
+    const analyzed = (Array.isArray(incidents) ? incidents : []).filter((i: any) => i.narrative)
+    if (analyzed.length === 0) { toast.error("No analyzed report available yet.", { id: t }); return }
+    const latest = analyzed[0]
+    const blob = new Blob([buildReportText(latest)], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `SOC-Report-${latest.id}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    logAuditEvent("download_report", "incident", latest.id, { risk_score: latest.risk_score, source_ip: latest.source_ip })
+    toast.success("Report downloaded", { id: t, description: latest.id })
+  } catch (e: any) {
+    toast.error("Failed to generate report", { id: t, description: String(e?.message || e) })
   }
+}
 
-  const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single()
+function ReportsList() {
+  const { data: incidents, isLoading } = useGetIncidents()
 
-  const userRole = profile?.role || "soc_analyst"
+  if (isLoading) return <p className="text-muted-foreground p-4 text-sm animate-pulse">Loading reports...</p>
+  if (!incidents || incidents.length === 0) return <p className="text-muted-foreground p-4 text-sm">No AI reports generated yet.</p>
 
   return (
-    <DashboardShell userRole={userRole}>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Security Reports</h1>
-            <p className="text-muted-foreground">Generate and view security analysis reports</p>
+    <>
+      {incidents.slice(0, 10).map((report: any) => (
+        <div key={report.id} className="flex items-center justify-between p-3 border border-border rounded-lg hover:border-orange-500/30 transition-colors">
+          <div className="flex items-center gap-3">
+            <FileText className="h-5 w-5 text-orange-400" />
+            <div>
+              <p className="font-medium text-sm">{report.title}</p>
+              <div className="flex gap-2 items-center mt-1">
+                <span className="text-xs text-muted-foreground">{new Date(report.timestamp).toLocaleString()}</span>
+                <Badge variant={report.severity === "critical" ? "destructive" : "secondary"} className="text-[10px] h-4">{report.severity}</Badge>
+              </div>
+            </div>
           </div>
-          <Button className="gap-2">
-            <FileText className="h-4 w-4" />
-            Generate New Report
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-2 border-orange-500/20 hover:bg-orange-500/10 hover:text-orange-500" asChild>
+              <a href={`/reports/${report.id}`}><FileText className="h-3 w-3" /> View</a>
+            </Button>
+          </div>
         </div>
+      ))}
+    </>
+  )
+}
 
-        {/* Quick Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Events</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">1,247</div>
-              <p className="text-xs text-muted-foreground">Last 30 days</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Critical Threats</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-destructive">18</div>
-              <p className="text-xs text-muted-foreground">Require immediate action</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Resolved</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-success">1,142</div>
-              <p className="text-xs text-muted-foreground">91.6% resolution rate</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Avg Response Time</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">12 min</div>
-              <p className="text-xs text-muted-foreground">-23% from last month</p>
-            </CardContent>
-          </Card>
-        </div>
+export default function ReportsPage() {
+  return (
+    <RequireAuth>
+      {(user) => (
+        <DashboardShell userRole={user.role}>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight">Security Reports</h1>
+                <p className="text-muted-foreground">Generate and view security analysis reports</p>
+              </div>
+            </div>
 
-        {/* Report Templates */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Report Templates</CardTitle>
-            <CardDescription>Pre-configured report templates for common security analyses</CardDescription>
-          </CardHeader>
-          <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
-              <Card className="border-2">
+              <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -93,48 +158,15 @@ export default async function ReportsPage() {
                     <Badge variant="secondary">Scheduled</Badge>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Comprehensive monthly security posture report including threat trends, incidents, and
-                    recommendations.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Generated on 1st of each month</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full gap-2 bg-transparent">
-                    <Download className="h-3 w-3" />
-                    Download Last Report
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">Comprehensive monthly security posture report.</p>
+                  <Button variant="outline" size="sm" className="w-full gap-2" asChild>
+                    <a href="/reports/monthly"><TrendingUp className="h-3 w-3" /> View Overview</a>
                   </Button>
                 </CardContent>
               </Card>
 
-              <Card className="border-2">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-5 w-5 text-orange-500" />
-                      <CardTitle className="text-base">Incident Response Report</CardTitle>
-                    </div>
-                    <Badge variant="outline">On-Demand</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Detailed analysis of security incidents including timeline, impact assessment, and remediation
-                    steps.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">12 reports generated this month</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full gap-2 bg-transparent">
-                    Generate Report
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card className="border-2">
+              <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -144,113 +176,29 @@ export default async function ReportsPage() {
                     <Badge variant="secondary">Scheduled</Badge>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Compliance status for regulatory frameworks including SOC2, ISO 27001, and GDPR requirements.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Generated quarterly</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full gap-2 bg-transparent">
-                    <Download className="h-3 w-3" />
-                    Download Last Report
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card className="border-2">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-5 w-5 text-purple-500" />
-                      <CardTitle className="text-base">Threat Intelligence Report</CardTitle>
-                    </div>
-                    <Badge variant="outline">On-Demand</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    AI-powered threat intelligence including emerging threats, vulnerabilities, and attack patterns.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Updated daily</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full gap-2 bg-transparent">
-                    Generate Report
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">SOC2, ISO 27001, and GDPR compliance status.</p>
+                  <Button variant="outline" size="sm" className="w-full gap-2" onClick={downloadLatestReport}>
+                    <Download className="h-3 w-3" /> Download Last Report
                   </Button>
                 </CardContent>
               </Card>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Recent Reports Data */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Historical Incident Reports</CardTitle>
-            <CardDescription>AI-generated cyber defense analyses pulled natively from the core engine.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <ReportsList />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </DashboardShell>
-  )
-}
-
-// Client Component to fetch gracefully
-async function ReportsList() {
-  try {
-    const res = await fetch('http://localhost:8001/api/v1/alerts/incidents', { next: { revalidate: 0 } })
-    if (!res.ok) return <p className="text-muted-foreground p-4">Error loading AI reports.</p>
-    const reports = await res.json()
-    
-    if (reports.length === 0) {
-      return <p className="text-muted-foreground p-4">No AI reports generated yet.</p>
-    }
-
-    return (
-      <>
-        {reports.map((report: any) => (
-          <div key={report.id} className="flex items-center justify-between p-3 border rounded-lg hover:border-blue-500 transition-colors">
-            <div className="flex items-center gap-3">
-              <FileText className="h-5 w-5 text-blue-400" />
-              <div>
-                <p className="font-medium text-sm">Target IP Analysis: {report.source_ip}</p>
-                <div className="flex gap-2 items-center mt-1">
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(report.created_at).toLocaleString()}
-                  </span>
-                  <Badge variant={report.risk_score > 70 ? "destructive" : "secondary"} className="text-[10px] h-4">
-                    Score: {report.risk_score}
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px] h-4 border-emerald-500 text-emerald-500">
-                    Tactic: {report.mitre_tactic}
-                  </Badge>
+            <Card>
+              <CardHeader>
+                <CardTitle>Historical Incident Reports</CardTitle>
+                <CardDescription>AI-generated cyber defense analyses from the SOC engine.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <ReportsList />
                 </div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <a href={`/reports/${report.id}`}>
-                <Button variant="outline" size="sm" className="gap-2 border-blue-500/20 hover:bg-blue-500/10 hover:text-blue-500">
-                  <FileText className="h-3 w-3" />
-                  View Detailed Report
-                </Button>
-              </a>
-              <Button variant="ghost" size="sm" className="gap-2">
-                <Download className="h-3 w-3" />
-              </Button>
-            </div>
+              </CardContent>
+            </Card>
           </div>
-        ))}
-      </>
-    )
-  } catch (error) {
-    return <p className="text-muted-foreground p-4">Cannot connect to the SOC AI backend API.</p>
-  }
+        </DashboardShell>
+      )}
+    </RequireAuth>
+  )
 }

@@ -1,0 +1,60 @@
+<!-- Local rules -->
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+
+<group name="local,syslog,sshd,">
+
+  <!-- Example Default Rule -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <srcip>1.1.1.1</srcip>
+    <description>sshd: authentication failed from IP 1.1.1.1.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+
+</group>
+
+<group name="local,attijari,fim,">
+
+  <!-- 1. Attijari SWIFT File Integrity Monitoring (Creation/Modification/Deletion) -->
+  <rule id="100010" level="12">
+    <if_sid>550,554,553</if_sid>
+    <match>/opt/attijari/swift/</match>
+    <description>Attijari FIM: Critical SWIFT transfer directory modified, deleted, or new file created.</description>
+    <group>attijari_swift,fim,pci_dss_11.5,</group>
+  </rule>
+
+  <!-- 2. Attijari Core Database Config FIM -->
+  <rule id="100011" level="14">
+    <if_sid>550,554</if_sid>
+    <match>/etc/attijari/db_config.ini</match>
+    <description>Attijari FIM: Core banking database configuration altered!</description>
+    <group>attijari_core,fim,pci_dss_11.5,</group>
+  </rule>
+
+  <!-- 3. Critical Banking User Auth Failure -->
+  <rule id="100012" level="10">
+    <if_sid>5716</if_sid>
+    <user>attijari_admin|swift_operator|db_admin</user>
+    <description>Attijari Auth: Failed SSH login attempt for critical banking account.</description>
+    <group>attijari_auth,authentication_failed,pci_dss_10.2.4,</group>
+  </rule>
+
+  <!-- 4. Multiple Failed Logins for Banking Admin (Brute Force) -->
+  <rule id="100013" level="12" frequency="5" timeframe="120">
+    <if_matched_sid>100012</if_matched_sid>
+    <same_source_ip />
+    <description>Attijari Auth: Brute force attack detected against critical banking account.</description>
+    <group>attijari_auth,authentication_failures,pci_dss_11.4,</group>
+  </rule>
+
+  <!-- 5. Attijari VIP Data Export (Custom JSON Application Log) -->
+  <rule id="100014" level="8">
+    <decoded_as>json</decoded_as>
+    <field name="app">attijari_portal</field>
+    <field name="action">export_vip_data</field>
+    <description>Attijari Data: VIP customer data export initiated.</description>
+    <group>attijari_data,gdpr,pci_dss_10.2.1,</group>
+  </rule>
+
+</group>

@@ -1,0 +1,204 @@
+# =============================================================================
+# Tier 1 - Detection: Wazuh manager/indexer/dashboard, ModSecurity WAF, WireGuard.
+# Mirrors ./soc-tier1/docker-compose.yml
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-manager
+  namespace: soc
+  labels: { app: wazuh-manager, tier: detection }
+spec:
+  selector: { app: wazuh-manager }
+  ports:
+    - { name: registration, port: 1515, targetPort: 1515 }
+    - { name: agents, port: 1514, targetPort: 1514 }
+    - { name: api, port: 55000, targetPort: 55000 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: wazuh-manager
+  namespace: soc
+  labels: { app: wazuh-manager, tier: detection }
+spec:
+  serviceName: wazuh-manager
+  replicas: 1
+  selector:
+    matchLabels: { app: wazuh-manager }
+  template:
+    metadata:
+      labels: { app: wazuh-manager, tier: detection }
+    spec:
+      containers:
+        - name: wazuh-manager
+          image: wazuh/wazuh-manager:4.9.2
+          ports:
+            - { containerPort: 1514 }
+            - { containerPort: 1515 }
+            - { containerPort: 55000 }
+          volumeMounts:
+            - { name: wazuh-ossec, mountPath: /var/ossec }
+          resources:
+            requests: { cpu: "250m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "3Gi" }
+  volumeClaimTemplates:
+    - metadata: { name: wazuh-ossec }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-indexer
+  namespace: soc
+  labels: { app: wazuh-indexer, tier: detection }
+spec:
+  selector: { app: wazuh-indexer }
+  ports:
+    - { port: 9200, targetPort: 9200 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: wazuh-indexer
+  namespace: soc
+  labels: { app: wazuh-indexer, tier: detection }
+spec:
+  serviceName: wazuh-indexer
+  replicas: 1
+  selector:
+    matchLabels: { app: wazuh-indexer }
+  template:
+    metadata:
+      labels: { app: wazuh-indexer, tier: detection }
+    spec:
+      containers:
+        - name: wazuh-indexer
+          image: wazuh/wazuh-indexer:4.9.2
+          ports:
+            - { containerPort: 9200 }
+          env:
+            - name: INDEXER_PASSWORD
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_PASSWORD } }
+          volumeMounts:
+            - { name: indexer-data, mountPath: /var/lib/wazuh-indexer }
+          resources:
+            requests: { cpu: "250m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "3Gi" }
+  volumeClaimTemplates:
+    - metadata: { name: indexer-data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 15Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-dashboard
+  namespace: soc
+  labels: { app: wazuh-dashboard, tier: detection }
+spec:
+  selector: { app: wazuh-dashboard }
+  ports:
+    - { port: 5601, targetPort: 5601 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wazuh-dashboard
+  namespace: soc
+  labels: { app: wazuh-dashboard, tier: detection }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: wazuh-dashboard }
+  template:
+    metadata:
+      labels: { app: wazuh-dashboard, tier: detection }
+    spec:
+      containers:
+        - name: wazuh-dashboard
+          image: wazuh/wazuh-dashboard:4.9.2
+          ports:
+            - { containerPort: 5601 }
+          env:
+            - name: WAZUH_API_URL
+              value: "https://wazuh-manager"
+            - name: API_USERNAME
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_USER } }
+            - name: API_PASSWORD
+              valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_PASSWORD } }
+          readinessProbe:
+            httpGet: { path: /, port: 5601, scheme: HTTPS }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: waf
+  namespace: soc
+  labels: { app: waf, tier: detection }
+spec:
+  selector: { app: waf }
+  ports:
+    - { port: 80, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waf
+  namespace: soc
+  labels: { app: waf, tier: detection }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: waf }
+  template:
+    metadata:
+      labels: { app: waf, tier: detection }
+    spec:
+      containers:
+        - name: waf
+          image: owasp/modsecurity-crs:nginx
+          env:
+            - { name: PARANOIA, value: "1" }
+            - { name: ANOMALY_INBOUND, value: "5" }
+            - { name: ANOMALY_OUTBOUND, value: "4" }
+            - { name: BACKEND, value: "http://wazuh-manager:55000" }
+          ports:
+            - { containerPort: 8080 }
+---
+# WireGuard VPN gateway. Requires elevated network privileges; runs as a single
+# privileged pod. On a locked-down cluster this needs a PodSecurity exception.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wireguard
+  namespace: soc
+  labels: { app: wireguard, tier: detection }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: wireguard }
+  template:
+    metadata:
+      labels: { app: wireguard, tier: detection }
+    spec:
+      containers:
+        - name: wireguard
+          image: linuxserver/wireguard:latest
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "SYS_MODULE"]
+          env:
+            - { name: PUID, value: "1000" }
+            - { name: PGID, value: "1000" }
+            - { name: SERVERPORT, value: "51820" }
+            - { name: PEERS, value: "1" }
+            - { name: INTERNAL_SUBNET, value: "10.13.13.0" }
+          ports:
+            - { containerPort: 51820, protocol: UDP }

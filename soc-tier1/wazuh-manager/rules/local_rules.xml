@@ -1,0 +1,96 @@
+<!-- Local Rules - Attijari CyberGuard SOC -->
+<!-- Enhanced Brute Force & Authentication Detection -->
+
+<group name="local,sshd,authentication,bruteforce,">
+
+  <!-- SSH Auth Failure - single event (parent for frequency rule) -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <description>SSH authentication failed.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,gdpr_IV_35.7.d,</group>
+  </rule>
+
+  <!-- SSH Brute Force: 5 failures in 2 minutes from same IP -->
+  <rule id="100002" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100001</if_matched_sid>
+    <same_source_ip />
+    <description>SSH brute force attack detected: Multiple authentication failures from same source IP.</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1078</id>
+    </mitre>
+    <group>authentication_failures,brute_force,pci_dss_10.2.4,</group>
+  </rule>
+
+  <!-- SSH Brute Force CRITICAL: 20 failures in 5 minutes -->
+  <rule id="100003" level="14" frequency="20" timeframe="300">
+    <if_matched_sid>100001</if_matched_sid>
+    <same_source_ip />
+    <description>SSH brute force CRITICAL: 20+ failures in 5 minutes from same source IP.</description>
+    <mitre>
+      <id>T1110</id>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failures,brute_force,high_volume,</group>
+  </rule>
+
+  <!-- Root SSH login success -->
+  <rule id="100030" level="12">
+    <if_sid>5715</if_sid>
+    <match>root</match>
+    <description>Root SSH login successful - possible unauthorized access.</description>
+    <mitre>
+      <id>T1078.003</id>
+    </mitre>
+    <group>authentication_success,root_login,</group>
+  </rule>
+
+  <!-- SSH login success - UEBA tracking -->
+  <rule id="100040" level="3">
+    <if_sid>5715</if_sid>
+    <description>SSH login successful - tracking user behavior baseline.</description>
+    <group>authentication_success,ueba_track,</group>
+  </rule>
+
+</group>
+
+<group name="local,windows,authentication,bruteforce,">
+
+  <!-- Windows failed logon - base rule -->
+  <rule id="100010" level="5">
+    <if_sid>60122</if_sid>
+    <description>Windows: Failed logon attempt.</description>
+    <group>authentication_failed,windows,</group>
+  </rule>
+
+  <!-- Windows brute force: 5 failures in 2 minutes -->
+  <rule id="100011" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100010</if_matched_sid>
+    <same_source_ip />
+    <description>Windows brute force: Multiple failed logons from same source IP.</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failures,brute_force,windows,</group>
+  </rule>
+
+  <!-- RDP failure - base rule -->
+  <rule id="100019" level="5">
+    <if_sid>60106</if_sid>
+    <description>RDP connection failure.</description>
+    <group>authentication_failed,rdp,</group>
+  </rule>
+
+  <!-- RDP brute force: 5 failures in 2 minutes -->
+  <rule id="100020" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100019</if_matched_sid>
+    <same_source_ip />
+    <description>RDP brute force: Multiple RDP connection failures from same source IP.</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1021.001</id>
+    </mitre>
+    <group>authentication_failures,brute_force,rdp,</group>
+  </rule>
+
+</group>

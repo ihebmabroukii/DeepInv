@@ -27,11 +27,11 @@ processors:
       fields: ["host", "agent.ephemeral_id"]
       ignore_missing: true
 
-output.logstash:
-  # Security Onion VM Beats input (port 5644) with TLS (self-signed cert)
-  hosts: ["${SECURITY_ONION_HOST}:5044"]
-  ssl.enabled: true
-  ssl.verification_mode: none   # Security Onion uses a self-signed cert
+output.elasticsearch:
+  hosts: ["https://wazuh.indexer:9200"]
+  username: "admin"
+  password: "admin"
+  ssl.verification_mode: none
 
 logging.level: info
 logging.to_files: true

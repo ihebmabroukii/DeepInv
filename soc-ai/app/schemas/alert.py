@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, IPvAnyAddress
+from pydantic import BaseModel, Field, IPvAnyAddress, field_validator
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
@@ -52,6 +52,12 @@ class NormalizedAlert(BaseModel):
     # Context
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
+    mitre_phase: Optional[int] = None
+    
+    # Advanced Analysis
+    campaign_id: Optional[str] = None
+    ueba_score: Optional[float] = None
+    ueba_anomalies: Optional[List[str]] = None  # Specific behavioral deviations captured at ingestion
     
     # AI Extension
     embedding: Optional[List[float]] = None
@@ -65,11 +71,12 @@ class ThreatIntelReturns(BaseModel):
 
 class Incident(BaseModel):
     """
-    Represents a group of alerts aggregated by Source IP.
-    This is the unit of work for the AI Analyst.
+    Represents a group of alerts. Now tracks both single-IP groups AND campaigns.
     """
-    id: str = Field(..., description="Unique Incident ID")
-    source_ip: str
+    id: str = Field(..., description="Unique Incident ID (can be campaign ID or generated)")
+    source_ip: str = Field(default="campaign", description="Primary Source IP or 'campaign'")
+    campaign_id: Optional[str] = None
+    victim_ip: Optional[str] = None
     alerts: List[NormalizedAlert]
     created_at: datetime
     
@@ -84,5 +91,44 @@ class Incident(BaseModel):
     rca: str = ""
     mitre_tactic: str = ""
     attack_stage: str = ""
-    threat_intel_indicators: List[str] = []
+    threat_intel_indicators: List[str] = Field(default_factory=list)
+    ueba_indicators: List[str] = Field(default_factory=list)
+    blast_radius: List[str] = Field(default_factory=list)
+    cves_exploited: List[str] = Field(default_factory=list)
+    exact_mitre_ttps: List[str] = Field(default_factory=list)
+    predicted_next_steps: str = ""
+    killchain_phases_seen: List[int] = Field(default_factory=list)
+    # Enrichment: summary of everything seen from/to the source IP (for the report).
+    ip_history: dict = Field(default_factory=dict)
+
+    @field_validator("ai_recommendations", "predicted_next_steps", "rca", "attack_stage", "recommended_playbook", mode="before")
+    @classmethod
+    def _normalize_string_fields(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return "\n".join(str(item) for item in value)
+        return str(value)
+
+    @field_validator(
+        "threat_intel_indicators",
+        "ueba_indicators",
+        "blast_radius",
+        "cves_exploited",
+        "exact_mitre_ttps",
+        "killchain_phases_seen",
+        mode="before"
+    )
+    @classmethod
+    def _normalize_list_fields(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return [value]
+
+    @field_validator("threat_intel", mode="before")
+    @classmethod
+    def _normalize_threat_intel(cls, value):
+        return value or ThreatIntelReturns()
 

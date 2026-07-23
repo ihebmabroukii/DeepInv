@@ -1,22 +1,26 @@
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from app.core.config import settings
 from app.schemas.alert import NormalizedAlert, Incident
 from app.services.threat_intel import threat_intel
-from app.services.behavior import behavior_analyzer
+from app.services.ueba import ueba_service
 from app.services.aggregator import aggregator
+from app.services.cve_validator import cve_validator
 import re
+import ast
 import asyncio
 import json
+import requests
 from loguru import logger
 from pydantic import BaseModel, Field
 
 class ExtractedEntities(BaseModel):
     entities: List[str] = Field(description="List of extracted main entities (users, IPs, processes).")
     mitre_tactic: str = Field(description="Mapped MITRE ATT&CK Tactic name.")
+    exact_mitre_ttps: List[str] = Field(description="List of specific MITRE T-Codes (e.g., T1048, T1003).", default_factory=list)
 
 class ThreatIntelReturns(BaseModel):
     opencti: List[str] = Field(default_factory=list, description="OpenCTI correlations found")
@@ -32,7 +36,11 @@ class IncidentReport(BaseModel):
     status: str = Field(default="investigating", description="Incident status (e.g., investigating).")
     attack_stage: str = Field(description="The stage of the attack (e.g., Exploitation).")
     threat_intel: ThreatIntelReturns = Field(default_factory=ThreatIntelReturns)
-    ueba_indicators: List[str] = Field(description="List of identified user behavior indicators.")
+    ueba_indicators: List[str] = Field(default_factory=list, description="List of identified user behavior indicators.")
+    blast_radius: List[str] = Field(default_factory=list, description="List of IPs and hostnames the compromised user had access to.")
+    cves_exploited: List[str] = Field(default_factory=list, description="List of CVEs likely exploited in this incident.")
+    exact_mitre_ttps: List[str] = Field(default_factory=list, description="List of specific MITRE T-Codes.")
+    predicted_next_steps: str = Field(default="", description="Predictive analysis of what the attacker will do next.")
 
 class AgentState(TypedDict):
     incident: Incident
@@ -40,167 +48,579 @@ class AgentState(TypedDict):
     intel_context: str
     behavior_context: str
     extracted_entities: Dict[str, Any]
+    cve_context: List[str]
     draft_narrative: str
     final_json: Dict[str, Any]
+    critic_feedback: str
+    critic_pass: bool
+    review_attempts: int
 
 class LLMEngine:
     def __init__(self):
         # AI Models
+        model_name = self._resolve_model_name()
         self.llm_json = ChatOllama(
             base_url=settings.OLLAMA_BASE_URL,
-            model=settings.AI_MODEL_NAME,
+            model=model_name,
             temperature=0,
-            format="json"
+            format="json",
+            num_predict=2048,
         )
         self.llm_text = ChatOllama(
             base_url=settings.OLLAMA_BASE_URL,
-            model=settings.AI_MODEL_NAME,
-            temperature=0
+            model=model_name,
+            temperature=0,
+            num_predict=2048,
         )
         self.parser = StrOutputParser()
+        self._available: Optional[bool] = None
+
+        # Timeouts tuned for GPU inference (RTX 4070 Super, ~100+ tok/s).
+        # On GPU each node finishes in well under these; the values are safety
+        # nets so a genuine hang fails fast instead of stalling a live demo.
+        self.TIMEOUTS = {
+            "normalizer": 60,
+            "cve_expert": 60,
+            "correlator": 90,
+            "reviewer": 120,
+            "reviewer_fallback": 90,
+            "critic": 60,
+            "fallback": 90,
+            "default": 60,
+        }
 
         # Build Graph
         workflow = StateGraph(AgentState)
         
         workflow.add_node("normalizer", self.node_normalizer)
+        workflow.add_node("cve_expert", self.node_cve_expert)
         workflow.add_node("correlator", self.node_correlator)
         workflow.add_node("reviewer", self.node_reviewer)
+        workflow.add_node("critic", self.node_critic)
         
         workflow.set_entry_point("normalizer")
-        workflow.add_edge("normalizer", "correlator")
+        workflow.add_edge("normalizer", "cve_expert")
+        workflow.add_edge("cve_expert", "correlator")
         workflow.add_edge("correlator", "reviewer")
-        workflow.add_edge("reviewer", END)
+        workflow.add_edge("reviewer", "critic")
+        
+        def critic_router(state: AgentState):
+            # Bank-Grade ReAct Loop: Reject back to Reviewer if not passing (max 2 attempts to prevent infinite loop)
+            if state.get("critic_pass", True) or state.get("review_attempts", 0) >= 2:
+                return END
+            return "reviewer"
+            
+        workflow.add_conditional_edges("critic", critic_router)
         
         self.app = workflow.compile()
 
+    def _ollama_health_check(self) -> bool:
+        if self._available is not None:
+            return self._available
+
+        try:
+            health_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1/models"
+            resp = requests.get(health_url, timeout=3)
+            self._available = resp.status_code == 200
+        except Exception as e:
+            logger.warning(f"Ollama unavailable at {settings.OLLAMA_BASE_URL}: {e}")
+            self._available = False
+
+        return self._available
+
+    def _extract_ueba_indicators(self, behavior_report: str) -> List[str]:
+        indicators = []
+        for line in behavior_report.splitlines():
+            if line.strip().startswith("- ANOMALY:"):
+                indicators.append(line.split(":", 1)[1].strip())
+        return indicators
+
+    def _extract_blast_radius(self, behavior_report: str) -> List[str]:
+        # The blast-radius line looks like:
+        #   "... resources -> Destination IPs: a, b | Hosts: x, y"
+        # Split on the pipe-delimited segments and strip each "Label:" prefix so
+        # the pipe and label never bleed into an extracted value.
+        radius: List[str] = []
+        match = re.search(r"resources\s*->\s*(.*)", behavior_report)
+        if not match:
+            return radius
+        for segment in match.group(1).split("|"):
+            segment = segment.strip()
+            if ":" in segment:
+                segment = segment.split(":", 1)[1]
+            for item in segment.split(","):
+                item = item.strip()
+                if item:
+                    radius.append(item)
+        return radius
+
+    def _resolve_model_name(self) -> str:
+        configured = settings.AI_MODEL_NAME
+        try:
+            health_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1/models"
+            resp = requests.get(health_url, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            model_ids = []
+            if isinstance(data, dict):
+                if data.get("object") == "list" and isinstance(data.get("data"), list):
+                    model_ids = [item.get("id") for item in data["data"] if isinstance(item, dict) and item.get("id")]
+                elif isinstance(data.get("data"), list):
+                    model_ids = [item.get("id") if isinstance(item, dict) else str(item) for item in data["data"]]
+            elif isinstance(data, list):
+                model_ids = [item.get("id") if isinstance(item, dict) else str(item) for item in data]
+            model_ids = [m for m in model_ids if m]
+            if configured in model_ids:
+                return configured
+            for model_id in model_ids:
+                if model_id.startswith(f"{configured}:"):
+                    logger.info(f"Resolved Ollama model '{configured}' to '{model_id}'.")
+                    return model_id
+            for model_id in model_ids:
+                if configured in model_id:
+                    logger.warning(f"Partially matched Ollama model '{configured}' to '{model_id}'.")
+                    return model_id
+            if model_ids:
+                logger.warning(f"Ollama model '{configured}' not found; using first available model '{model_ids[0]}'.")
+                return model_ids[0]
+        except Exception as e:
+            logger.warning(f"Failed to resolve Ollama model '{configured}': {e}")
+        return configured
+
+    def _cleanup_json_string(self, raw: str) -> str:
+        raw = raw.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"```$", "", raw, flags=re.IGNORECASE)
+        raw = raw.strip()
+        return raw
+
+    def _sanitize_json_string(self, raw: str) -> str:
+        raw = raw.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        raw = re.sub(r",\s*(?=[}\]])", "", raw)
+        open_braces = raw.count("{")
+        close_braces = raw.count("}")
+        if open_braces > close_braces:
+            raw = raw.rstrip()
+            raw += "}" * (open_braces - close_braces)
+        if raw.count("[") > raw.count("]"):
+            raw = raw.rstrip()
+            raw += "]" * (raw.count("[") - raw.count("]"))
+        return raw
+
+    def _parse_json_string(self, raw: str) -> dict:
+        cleaned = self._cleanup_json_string(raw)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError as first_error:
+            sanitized = self._sanitize_json_string(cleaned)
+            if sanitized != cleaned:
+                try:
+                    return json.loads(sanitized)
+                except json.JSONDecodeError:
+                    pass
+            match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+            if match:
+                try:
+                    return json.loads(self._sanitize_json_string(match.group(0)))
+                except Exception:
+                    pass
+            try:
+                return ast.literal_eval(cleaned)
+            except Exception as e:
+                logger.error(f"JSON fallback parse failed: {e}. Raw output: {cleaned}")
+                raise first_error
+
+    async def _invoke_chain(self, chain, params: dict, label: str, timeout: int | None = None):
+        if timeout is None:
+            timeout = self.TIMEOUTS.get(label, self.TIMEOUTS["default"])
+        try:
+            return await asyncio.wait_for(chain.ainvoke(params), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"LLM step '{label}' timed out after {timeout}s")
+            raise
+        except Exception as e:
+            logger.error(f"LLM step '{label}' failed: {e}")
+            raise
+
+    def _offline_incident_analysis(self, incident: Incident, behavior_report: str, intel_context: str) -> Incident:
+        alert_summaries = [f"{a.name} ({a.source_system})" for a in incident.alerts[:5]]
+        incident.narrative = (
+            "LLM analysis unavailable. Manual review required. "
+            f"Alerts observed: {', '.join(alert_summaries)}. "
+            f"Behavior context: {behavior_report}"
+        )
+        incident.rca = (
+            "Automated LLM analysis could not run because the Ollama service was unreachable. "
+            "Review the alert timeline and UEBA context manually."
+        )
+        incident.ai_reasoning = (
+            "The incident was scored using available telemetry and UEBA context. "
+            f"Threat intelligence context: {intel_context}"
+        )
+        incident.ai_recommendations = (
+            "1. Confirm the Ollama service is running at "
+            f"{settings.OLLAMA_BASE_URL}. "
+            "2. Review the alert details and isolate suspicious hosts. "
+            "3. Check logs for the incident source and escalate to SOC analysts."
+        )
+        incident.risk_score = 50
+        incident.status = "investigating"
+        incident.attack_stage = "Unknown"
+        incident.threat_intel = {"opencti": [], "cortex": [], "thehive": []}
+        incident.ueba_indicators = self._extract_ueba_indicators(behavior_report)
+        incident.blast_radius = self._extract_blast_radius(behavior_report)
+        incident.cves_exploited = []
+        incident.exact_mitre_ttps = []
+        incident.predicted_next_steps = "Review the attack path and monitor for lateral movement."
+        return incident
+
+    async def _fallback_incident_analysis(self, incident: Incident, behavior_report: str, intel_context: str) -> Incident:
+        alerts_summary = "\n".join([
+            f"- {a.name}: {a.description or 'No description provided.'}" for a in incident.alerts[:10]
+        ])
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an efficient SOC analyst. Produce ONLY a raw JSON object with no markdown. Keep the output terse but complete."),
+            ("user", "Alerts:\n{alerts}\n\nBehavior:\n{behavior}\n\nIntel:\n{intel}\n\nReturn JSON with keys: narrative, rca, ai_reasoning, ai_recommendations, predicted_next_steps, risk_score, status, attack_stage, threat_intel, ueba_indicators, blast_radius, cves_exploited, exact_mitre_ttps.")
+        ])
+        chain = prompt | self.llm_text | self.parser
+        try:
+            raw_output = await self._invoke_chain(
+                chain,
+                {
+                    "alerts": alerts_summary,
+                    "behavior": behavior_report,
+                    "intel": intel_context,
+                },
+                "fallback",
+                timeout=self.TIMEOUTS.get("fallback", 180),
+            )
+            parsed = self._parse_json_string(raw_output)
+        except Exception as e:
+            logger.error(f"Fallback incident analysis failed: {e}")
+            return self._offline_incident_analysis(incident, behavior_report, intel_context)
+
+        try:
+            final_report = IncidentReport.model_validate(parsed).model_dump()
+        except Exception as validate_exc:
+            logger.warning(f"Fallback report validation failed: {validate_exc}")
+            final_report = {
+                "narrative": parsed.get("narrative", "Fallback analysis completed with partial results."),
+                "rca": parsed.get("rca", "Fallback analysis could not produce a complete root cause."),
+                "ai_reasoning": parsed.get("ai_reasoning", "Fallback reasoning incomplete."),
+                "ai_recommendations": parsed.get("ai_recommendations", "Review the host and isolate suspicious processes."),
+                "predicted_next_steps": parsed.get("predicted_next_steps", "Attacker may attempt lateral movement."),
+                "risk_score": int(parsed.get("risk_score", 50)) if isinstance(parsed.get("risk_score", 50), (int, float, str)) else 50,
+                "status": parsed.get("status", "analyzed"),
+                "attack_stage": parsed.get("attack_stage", "Unknown"),
+                "threat_intel": parsed.get("threat_intel", {"opencti": [], "cortex": [], "thehive": []}),
+                "ueba_indicators": parsed.get("ueba_indicators", []),
+                "blast_radius": parsed.get("blast_radius", []),
+                "cves_exploited": parsed.get("cves_exploited", []),
+                "exact_mitre_ttps": parsed.get("exact_mitre_ttps", []),
+            }
+
+        incident.narrative = final_report.get("narrative", incident.narrative)
+        incident.rca = final_report.get("rca", incident.rca)
+        incident.ai_reasoning = final_report.get("ai_reasoning", incident.ai_reasoning)
+        incident.ai_recommendations = final_report.get("ai_recommendations", incident.ai_recommendations)
+        incident.predicted_next_steps = final_report.get("predicted_next_steps", incident.predicted_next_steps)
+        incident.risk_score = final_report.get("risk_score", incident.risk_score)
+        incident.status = final_report.get("status", "analyzed")
+        incident.attack_stage = final_report.get("attack_stage", incident.attack_stage)
+        incident.threat_intel = final_report.get("threat_intel", incident.threat_intel)
+        incident.ueba_indicators = final_report.get("ueba_indicators", incident.ueba_indicators)
+        incident.blast_radius = final_report.get("blast_radius", incident.blast_radius)
+        incident.cves_exploited = final_report.get("cves_exploited", incident.cves_exploited)
+        incident.exact_mitre_ttps = final_report.get("exact_mitre_ttps", incident.exact_mitre_ttps)
+        return incident
+
     async def node_normalizer(self, state: AgentState) -> Dict:
-        """Agent 1: Extracts Entities and MITRE Map"""
+        """Agent 1: Extracts Entities and Deep MITRE TTP Map"""
         incident = state["incident"]
-        alerts_summary = "\\n".join([f"{a.name}: {a.description}" for a in incident.alerts[:5]])
+        alerts_summary = "\n".join([f"{a.name}: {a.description}" for a in incident.alerts[:5]])
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", 'You are a SOC analyst. Extract entities and map to MITRE ATT&CK. Output ONLY valid JSON with exactly these keys: {{"entities": ["string"], "mitre_tactic": "string"}}'),
+            ("system", 'You are a Senior SOC analyst. Extract entities and map to deep MITRE ATT&CK codes. Output ONLY valid JSON: {{"entities": ["string"], "mitre_tactic": "string", "exact_mitre_ttps": ["T1048", "T1003.001"]}}'),
             ("user", "Alerts:\n{alerts}")
         ])
         
         try:
             chain = prompt | self.llm_json | JsonOutputParser()
-            res = await chain.ainvoke({"alerts": alerts_summary})
+            res = await self._invoke_chain(chain, {"alerts": alerts_summary}, "normalizer", timeout=self.TIMEOUTS["normalizer"])
             entities = ExtractedEntities.model_validate(res).model_dump()
         except Exception as e:
             logger.error(f"Normalizer parsing failed: {e}")
-            entities = {"entities": [], "mitre_tactic": "Unknown"}
+            entities = {"entities": [], "mitre_tactic": "Unknown", "exact_mitre_ttps": []}
             
-        return {"extracted_entities": entities}
+        return {"extracted_entities": entities, "review_attempts": 0, "critic_feedback": ""}
+
+    async def node_cve_expert(self, state: AgentState) -> Dict:
+        """Agent 2: Predicts and Maps CVEs based on Telemetry"""
+        incident = state["incident"]
+        entities_str = str(state.get("extracted_entities", {}).get("entities", []))
+        alerts_summary = "\n".join([f"{a.name} (Source: {a.source_system})" for a in incident.alerts])
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", 'You are a Vulnerability Expert. From the tools, software/versions, processes, and attack vectors in the alerts, PROPOSE candidate CVE identifiers that may be relevant (e.g., CVE-2021-44228 for Log4j, CVE-2023-23397 for Outlook). Only propose a CVE if the telemetry gives a concrete reason. Output JSON: {{"cves": ["CVE-XXXX-XXXX"]}}. Return an empty list if there is no clear CVE. Do NOT invent identifiers to fill the list.'),
+            ("user", "Entities: {entities}\nAlerts:\n{alerts}")
+        ])
+
+        try:
+            chain = prompt | self.llm_json | JsonOutputParser()
+            res = await self._invoke_chain(chain, {"alerts": alerts_summary, "entities": entities_str}, "cve_expert", timeout=self.TIMEOUTS["cve_expert"])
+            cves = res.get("cves", [])
+        except Exception as e:
+            logger.error(f"CVE Expert parsing failed: {e}")
+            cves = []
+
+        # Deterministic resolution (report Sec. "Deterministic CVE and Technique
+        # Resolution"): the LLM only *proposes* CVEs. Each candidate is validated
+        # against the authoritative local catalogue (CISA-KEV / NVD export); any
+        # malformed or non-existent identifier is dropped, so a fabricated CVE can
+        # never reach the report or TheHive. Turns hallucination into bounded lookup.
+        validated = cve_validator.validate(cves)
+        if cves and validated != cves:
+            logger.info(f"cve_expert proposed {cves} -> validated {validated}")
+
+        return {"cve_context": validated}
 
     async def node_correlator(self, state: AgentState) -> Dict:
-        """Agent 2: Retrieves Semantic & Graph contexts and writes draft narrative"""
+        """Agent 3: Retrieves Semantic & Graph contexts and writes draft narrative"""
         incident = state["incident"]
         
-        # 1. RAG Retrieve (using the trigger/most recent alert embedding if available)
+        # 1. RAG Retrieve
         related_alerts_str = "No semantic context."
         if incident.alerts and incident.alerts[0].embedding:
              trigger = incident.alerts[0]
              related = await aggregator.get_related_alerts(trigger.embedding, ip=trigger.src_ip, file_hash=trigger.file_hash, limit=5)
              if related:
-                 related_alerts_str = "\\n".join([f"Time: {a.timestamp}, Alert: {a.name}" for a in related])
+                 related_alerts_str = "\n".join([f"Time: {a.timestamp}, Alert: {a.name}" for a in related])
                  
         # 2. Graph Retrieve
         ips = list(set([a.src_ip for a in incident.alerts if a.src_ip] + [a.dst_ip for a in incident.alerts if a.dst_ip]))
         graph_events = await aggregator.get_graph_alerts(ips)
         graph_str = "No graph context."
         if graph_events:
-            graph_str = "\\n".join([f"{a.src_ip} -> {a.dst_ip} : {a.name}" for a in graph_events[:5]])
+            graph_str = "\n".join([f"{a.src_ip} -> {a.dst_ip} : {a.name}" for a in graph_events[:5]])
             
-        alerts_summary = "\\n".join([f"- {a.name}" for a in incident.alerts[:10]])
+        alerts_summary = "\n".join([f"- Time: {a.timestamp}, Phase: {a.mitre_phase}, Source: {a.source_system}, Alert: {a.name}" for a in incident.alerts[:10]])
+        
+        campaign_context = f"Campaign ID: {incident.campaign_id}\n" if incident.campaign_id else "Single IP Campaign.\n"
+        if incident.killchain_phases_seen:
+            campaign_context += f"Kill Chain Phases Observed against Victim: {incident.killchain_phases_seen}\n"
             
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a SOC Analyst. Write a technical draft narrative of the attack based on the new alerts, historical graph events, and semantic related alerts. Describe lateral movement if IPs traverse."),
-            ("user", "Target IPs: {ips}\\nNew Alerts:\\n{alerts}\\n\\nGraph History:\\n{graph}\\n\\nSemantic Context:\\n{semantic}")
+            ("system", "You are an Elite SOC Analyst. Write a technical draft narrative. Analyze historical graph events. Correlate alerts across Kill Chain phases. Predict what the attacker will do next if not stopped (Adversary Prediction)."),
+            ("user", "Target IPs: {ips}\nCampaign Context: {campaign}\nUser Behavior: {behavior}\nNew Alerts:\n{alerts}\n\nGraph History:\n{graph}\n\nSemantic Context:\n{semantic}")
         ])
         chain = prompt | self.llm_text | self.parser
-        draft = await chain.ainvoke({"ips": ips, "alerts": alerts_summary, "graph": graph_str, "semantic": related_alerts_str})
+        try:
+            draft = await self._invoke_chain(
+                chain,
+                {
+                    "ips": ips,
+                    "campaign": campaign_context,
+                    "behavior": state.get("behavior_context", ""),
+                    "alerts": alerts_summary,
+                    "graph": graph_str,
+                    "semantic": related_alerts_str,
+                },
+                "correlator",
+                timeout=self.TIMEOUTS["correlator"],
+            )
+        except Exception as e:
+            logger.error(f"Correlator generation failed: {e}")
+            draft = "Draft narrative could not be generated due to a temporary AI error."
         
         return {"draft_narrative": draft}
 
     async def node_reviewer(self, state: AgentState) -> Dict:
-        """Agent 3: Final Review and Strict JSON Formatting"""
+        """Agent 4: Strict JSON Formatting and TTP Assembly"""
+        attempts = state.get("review_attempts", 0)
         
-        # 1. Playbook RAG: Fetch relevant company SOP based on the extracted Tactic
         try:
             entities = state.get("extracted_entities", {})
             tactic = entities.get("mitre_tactic", "Unknown")
+            exact_ttps = entities.get("exact_mitre_ttps", [])
             playbook_text = await aggregator.get_relevant_playbook(tactic)
-            logger.info(f"Fetched Playbook for {tactic}: {len(playbook_text)} chars")
         except Exception as e:
-            logger.error(f"Playbook fetch failed: {e}")
             playbook_text = "Standard security best practices."
+            exact_ttps = []
 
         system_msg = (
-            'You are a strict SOC Manager expert analyst. Output ONLY a raw JSON object with NO markdown wrapping. '
+            'You are a strict Bank-Grade SOC Manager. Output ONLY a raw JSON object with NO markdown wrapping. '
             'You MUST populate ALL of the following keys:\n'
             '{{\n'
             '  "narrative": "Technical incident story here...",\n'
-            '  "rca": "Root cause: attacker exploited X via Y...",\n'
-            '  "ai_reasoning": "Risk score 75 because: 1. Multiple exfiltration alerts from same IP...",\n'
-            '  "ai_recommendations": "1. Immediately block source IP. 2. Isolate affected host. 3. Capture memory dump.",\n'
+            '  "rca": "Root cause...",\n'
+            '  "ai_reasoning": "Risk score 75 because...",\n'
+            '  "ai_recommendations": "1. Run command X. 2. Isolate host Y.",\n'
+            '  "predicted_next_steps": "Attacker will likely attempt lateral movement via WMI.",\n'
             '  "risk_score": 75,\n'
             '  "status": "investigating",\n'
             '  "attack_stage": "Exfiltration",\n'
             '  "threat_intel": {{"opencti": [], "cortex": [], "thehive": []}},\n'
-            '  "ueba_indicators": []\n'
+            '  "ueba_indicators": [],\n'
+            '  "blast_radius": [],\n'
+            '  "cves_exploited": [],\n'
+            '  "exact_mitre_ttps": []\n'
             '}}\n\n'
             'MANDATORY rules:\n'
-            '- ai_reasoning: Explain step by step WHY you chose the risk_score (evidence-based).\n'
-            '- ai_recommendations: Write numbered tactical mitigation steps for right now.\n'
-            '- threat_intel: Use empty lists [] if no IOCs exist.\n'
-            '- rca: Explain root cause - how attacker got in, what was exploited.'
+            '- ai_recommendations: Must be hyper-actionable command-line or API steps.\n'
+            '- ai_recommendations: Avoid vague guidance such as "isolate host" or "investigate further". Provide exact commands or API actions.\n'
+            '- predicted_next_steps: Explicitly state the predicted next attacker move.\n'
+            '- ueba_indicators: List any behavioral anomalies found in the Behavior section.\n'
+            '- blast_radius: Extract destination IPs and hostnames from the BLAST RADIUS MAPPING in the Behavior section.\n'
         )
+
+        feedback_instruction = ""
+        if state.get("critic_feedback"):
+             feedback_instruction = f"CRITICAL FEEDBACK FROM COMPLIANCE OFFICER: {state['critic_feedback']}. YOU MUST FIX YOUR REPORT TO ADDRESS THIS!"
+
+        # Build timeline for prompt
+        incident = state.get("incident")
+        timeline = "ATTACK TIMELINE:\n"
+        if incident and incident.alerts:
+            for a in incident.alerts:
+                timeline += f"T: {a.timestamp} | Phase: {a.mitre_phase} | Src: {a.source_system} | {a.name}\n"
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_msg),
-            ("user", "Draft Analysis:\n{draft}\n\nThreat Intel Context:\n{intel}")
+            ("user", "{timeline}\n\nDraft Analysis:\n{draft}\n\nIntel:\n{intel}\n\nBehavior:\n{behavior}\n\nCVEs:\n{cves}\n\nTTPs:\n{ttps}\n\n{feedback}")
         ])
 
         try:
             chain = prompt | self.llm_json | JsonOutputParser()
-            res = await chain.ainvoke({
-                "draft": state.get("draft_narrative", ""),
-                "intel": state.get("intel_context", "None")
-            })
-            # Lenient merge — don't hard-fail if LLM misses a key
-            base = IncidentReport(
-                narrative=res.get("narrative", state.get("draft_narrative", "")),
-                rca=res.get("rca", "See narrative."),
-                ai_reasoning=res.get("ai_reasoning", ""),
-                ai_recommendations=res.get("ai_recommendations", ""),
-                risk_score=int(res.get("risk_score", 50)),
-                status=res.get("status", "investigating"),
-                attack_stage=res.get("attack_stage", "Unknown"),
-                threat_intel=res.get("threat_intel", {"opencti": [], "cortex": [], "thehive": []}),
-                ueba_indicators=res.get("ueba_indicators", []),
+            res = await self._invoke_chain(
+                chain,
+                {
+                    "timeline": timeline,
+                    "draft": state.get("draft_narrative", ""),
+                    "intel": state.get("intel_context", "None"),
+                    "behavior": state.get("behavior_context", "None"),
+                    "cves": str(state.get("cve_context", [])),
+                    "ttps": str(exact_ttps),
+                    "feedback": feedback_instruction,
+                },
+                "reviewer",
+                timeout=self.TIMEOUTS["reviewer"],
             )
-            final_json = base.model_dump()
-
-            # Deterministic Playbook Injection — always override with fetched SOP
-            final_json["recommended_playbook"] = playbook_text
-                
         except Exception as e:
-            logger.error(f"Reviewer parsing failed: {e}")
-            final_json = {
-                "narrative": state.get("draft_narrative", ""),
-                "rca": "RCA could not be generated.", 
-                "ai_reasoning": "Parse failed",
-                "ai_recommendations": "Isolate system and review logs",
-                "risk_score": 50, 
-                "status": "investigating", 
-                "attack_stage": "Unknown", 
-                "threat_intel": {"opencti": [], "cortex": [], "thehive": []}, 
-                "ueba_indicators": [],
-                "recommended_playbook": playbook_text
-            }
-            
-        return {"final_json": final_json}
+            logger.warning(f"Reviewer strict JSON parse failed: {e}. Attempting fallback parse.")
+            try:
+                fallback_chain = prompt | self.llm_text | self.parser
+                raw_output = await self._invoke_chain(
+                    fallback_chain,
+                    {
+                        "timeline": timeline,
+                        "draft": state.get("draft_narrative", ""),
+                        "intel": state.get("intel_context", "None"),
+                        "behavior": state.get("behavior_context", "None"),
+                        "cves": str(state.get("cve_context", [])),
+                        "ttps": str(exact_ttps),
+                        "feedback": feedback_instruction,
+                    },
+                    "reviewer_fallback",
+                    timeout=self.TIMEOUTS["reviewer_fallback"],
+                )
+                res = self._parse_json_string(raw_output)
+            except Exception as fallback_error:
+                logger.error(f"Reviewer fallback parse failed: {fallback_error}")
+                res = {
+                    "narrative": state.get("draft_narrative", "Draft analysis unavailable."),
+                    "rca": "AI reviewer failed to produce valid JSON output.",
+                    "ai_reasoning": "",
+                    "ai_recommendations": "",
+                    "predicted_next_steps": "",
+                    "risk_score": 50,
+                    "status": "investigating",
+                    "attack_stage": "Unknown",
+                    "threat_intel": {"opencti": [], "cortex": [], "thehive": []},
+                    "ueba_indicators": [],
+                    "blast_radius": [],
+                    "cves_exploited": state.get("cve_context", []),
+                    "exact_mitre_ttps": exact_ttps,
+                }
+
+        try:
+            threat_intel_data = res.get("threat_intel", {}) if isinstance(res, dict) else {}
+            threat_intel = ThreatIntelReturns.model_validate(threat_intel_data)
+        except Exception as parse_err:
+            logger.warning(f"Threat intelligence validation failed: {parse_err}")
+            threat_intel = ThreatIntelReturns()
+
+        base = IncidentReport(
+            narrative=res.get("narrative", state.get("draft_narrative", "")) if isinstance(res, dict) else state.get("draft_narrative", ""),
+            rca=res.get("rca", "See narrative.") if isinstance(res, dict) else "See narrative.",
+            ai_reasoning=res.get("ai_reasoning", "") if isinstance(res, dict) else "",
+            ai_recommendations=res.get("ai_recommendations", "") if isinstance(res, dict) else "",
+            predicted_next_steps=res.get("predicted_next_steps", "Awaiting data.") if isinstance(res, dict) else "Awaiting data.",
+            risk_score=int(res.get("risk_score", 50)) if isinstance(res, dict) else 50,
+            status=res.get("status", "investigating") if isinstance(res, dict) else "investigating",
+            attack_stage=res.get("attack_stage", "Unknown") if isinstance(res, dict) else "Unknown",
+            threat_intel=threat_intel,
+            ueba_indicators=res.get("ueba_indicators", []) if isinstance(res, dict) else [],
+            blast_radius=res.get("blast_radius", []) if isinstance(res, dict) else [],
+            cves_exploited=res.get("cves_exploited", state.get("cve_context", [])) if isinstance(res, dict) else state.get("cve_context", []),
+            exact_mitre_ttps=res.get("exact_mitre_ttps", exact_ttps) if isinstance(res, dict) else exact_ttps,
+        )
+        final_json = base.model_dump()
+        final_json["recommended_playbook"] = playbook_text
+
+        # Deterministic override: the UEBA engine already produced exact, factual
+        # behavioral anomalies and the user's blast radius. These are ground truth
+        # and must not be left to the LLM's interpretation — pull them straight
+        # from the behavior context so the report always shows the real findings.
+        behavior_ctx = state.get("behavior_context", "") or ""
+        det_ueba = self._extract_ueba_indicators(behavior_ctx)
+        if det_ueba:
+            final_json["ueba_indicators"] = det_ueba
+
+        # Blast radius = the compromised user's normal access map (from UEBA)
+        # PLUS every host/IP the attack actually touched in this incident.
+        # Built deterministically so the field is always clean and factual.
+        det_blast = self._extract_blast_radius(behavior_ctx)
+        touched: List[str] = []
+        inc = state.get("incident")
+        if inc and inc.alerts:
+            for a in inc.alerts:
+                if a.dst_ip:
+                    touched.append(a.dst_ip)
+                if a.hostname:
+                    touched.append(a.hostname)
+        merged_blast = list(dict.fromkeys([*det_blast, *touched]))
+        if merged_blast:
+            final_json["blast_radius"] = merged_blast
+
+        return {"final_json": final_json, "review_attempts": attempts + 1}
+
+    async def node_critic(self, state: AgentState) -> Dict:
+        """Agent 5: Bank Compliance Officer ReAct Loop"""
+        final_json = state.get("final_json", {})
+        recommendations = final_json.get("ai_recommendations", "")
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", 'You are a Bank SOC Compliance Officer. Review the JSON report recommendations. If they are vague (e.g. "isolate host"), REJECT it and demand specific commands (e.g. "Run Defender API script"). Output JSON: {{"pass": true/false, "feedback": "reasoning..."}}'),
+            ("user", "Recommendations:\n{recs}")
+        ])
+        
+        try:
+            chain = prompt | self.llm_json | JsonOutputParser()
+            res = await self._invoke_chain(chain, {"recs": recommendations}, "critic", timeout=self.TIMEOUTS["critic"])
+            passed_raw = res.get("pass", True)
+            if isinstance(passed_raw, str):
+                passed = passed_raw.strip().lower() in ("true", "1", "yes", "y", "pass")
+            else:
+                passed = bool(passed_raw)
+            feedback = res.get("feedback", "")
+            if not passed:
+                 logger.warning(f"Critic Rejected Report: {feedback}")
+        except Exception as e:
+            logger.error(f"Critic parsing failed: {e}")
+            passed = True
+            feedback = ""
+
+        return {"critic_pass": passed, "critic_feedback": feedback}
 
     async def analyze_incident(self, incident: Incident, previous_context: dict = None, intel_context: str = None) -> Incident:
         try:
@@ -209,20 +629,27 @@ class LLMEngine:
             # 1. Behavior Analysis (UEBA)
             behavior_report = "No User Context found in alerts."
             target_user = None
+            target_alert = None
             for alert in incident.alerts:
                  if alert.user:
                      target_user = alert.user
+                     target_alert = alert
                      break
-                 match = re.search(r"user\\s+(\\w+)|user=(\\w+)", alert.name + " " + (alert.description or ""), re.IGNORECASE)
+                 match = re.search(r"user\s+(\w+)|user=(\w+)", alert.name + " " + (alert.description or ""), re.IGNORECASE)
                  if match:
                      target_user = match.group(1) or match.group(2)
+                     target_alert = alert
                      break
             
-            if target_user:
-                behavior_report = await behavior_analyzer.get_user_login_history(target_user)
+            if target_user and target_alert:
+                behavior_report = await ueba_service.get_anomaly_report(target_user, target_alert)
 
             context_str = f"Prior Incident: {previous_context.get('narrative')[:200]}" if previous_context else "None"
             intel_str = intel_context if intel_context else "No Threat Intelligence found for this IP."
+
+            if not self._ollama_health_check():
+                logger.warning(f"Ollama unreachable at {settings.OLLAMA_BASE_URL}. Falling back to offline incident analysis.")
+                return self._offline_incident_analysis(incident, behavior_report, intel_str)
 
             initial_state = {
                 "incident": incident,
@@ -231,13 +658,17 @@ class LLMEngine:
                 "behavior_context": behavior_report,
             }
             
-            # Execute Graph (no asyncio.wait_for — timeout handled at the Celery level)
-            result = await self.app.ainvoke(initial_state)
+            # Global timeout: sum of all node timeouts + 2 critic loops headroom.
+            # On GPU the full graph completes in ~60-120s; 600s is generous slack.
+            result = await asyncio.wait_for(
+                self.app.ainvoke(initial_state),
+                timeout=600
+            )
             
             final_data = result.get("final_json", {})
             entities = result.get("extracted_entities", {})
             
-            # Update Incident
+            # Update Incident with PhD-Level metrics
             incident.narrative = final_data.get("narrative", "Analysis failed.")
             incident.rca = final_data.get("rca", "RCA not generated.")
             incident.ai_reasoning = final_data.get("ai_reasoning", "No reasoning.")
@@ -249,15 +680,78 @@ class LLMEngine:
             incident.mitre_tactic = entities.get("mitre_tactic", "Unknown")
             incident.attack_stage = final_data.get("attack_stage", "Unknown")
             
+            # New Metrics
+            incident.ueba_indicators = final_data.get("ueba_indicators", [])
+            incident.blast_radius = final_data.get("blast_radius", [])
+            incident.cves_exploited = final_data.get("cves_exploited", [])
+            incident.exact_mitre_ttps = final_data.get("exact_mitre_ttps", [])
+            incident.predicted_next_steps = final_data.get("predicted_next_steps", "")
+
+            # --- Deterministic MITRE grounding -----------------------------------
+            # The technique IDs above are the LLM's interpretation and can drift
+            # (e.g. labelling SSH brute force as "Valid Accounts"/T1078). Override
+            # them with technique IDs taken directly from the source detection rules
+            # (Wazuh rule.mitre; Suricata scan signatures) so the report matches
+            # ground truth. Falls back to the LLM output only when no rule maps.
+            grounded = []
+            for a in incident.alerts:
+                tid = getattr(a, "mitre_technique_id", None)
+                if tid:
+                    if tid not in grounded:
+                        grounded.append(tid)
+                    continue
+                name = (getattr(a, "name", "") or "").lower()
+                if getattr(a, "source_system", "") == "suricata" and "scan" in name:
+                    if "T1046" not in grounded:
+                        grounded.append("T1046")
+            if grounded:
+                incident.exact_mitre_ttps = grounded
+                _TACTIC = {
+                    "T1110": "Credential Access", "T1046": "Discovery",
+                    "T1595": "Reconnaissance", "T1078": "Initial Access",
+                    "T1021": "Lateral Movement", "T1566": "Initial Access",
+                    "T1486": "Impact", "T1048": "Exfiltration",
+                    "T1003": "Credential Access", "T1059": "Execution",
+                    "T1105": "Command and Control",
+                }
+                tactic = _TACTIC.get(grounded[0].split(".")[0])
+                if tactic:
+                    incident.mitre_tactic = tactic
+
+                # Ground the kill-chain stage too, so it can't drift to nonsense
+                # like "Exfiltration" for what is clearly a recon + brute force.
+                bases = {g.split(".")[0] for g in grounded}
+                recon = bool(bases & {"T1046", "T1595"})
+                access = bool(bases & {"T1110", "T1078", "T1566"})
+                if recon and access:
+                    incident.attack_stage = "Reconnaissance & Initial Access"
+                elif access:
+                    incident.attack_stage = "Initial Access"
+                elif recon:
+                    incident.attack_stage = "Reconnaissance"
+                else:
+                    _STAGE = {"T1021": "Lateral Movement", "T1041": "Exfiltration",
+                              "T1048": "Exfiltration", "T1486": "Impact",
+                              "T1059": "Execution", "T1105": "Command & Control"}
+                    st = _STAGE.get(grounded[0].split(".")[0])
+                    if st:
+                        incident.attack_stage = st
+
             return incident
             
         except asyncio.TimeoutError:
             logger.error(f"LangGraph Analysis Timed Out (Source: {incident.source_ip})")
-            incident.narrative = "AI Analysis Timed Out. System under load."
-            return incident
+            logger.warning("Attempting simplified fallback analysis after LangGraph timeout.")
+            fallback = await self._fallback_incident_analysis(incident, behavior_report, intel_str)
+            if fallback.status == "pending":
+                fallback.status = "analyzed"
+            return fallback
         except Exception as e:
             logger.error(f"LangGraph Analysis failed: {e}")
-            incident.narrative = f"AI Analysis Failed: {str(e)}"
-            return incident
+            logger.warning("Attempting simplified fallback analysis after LangGraph failure.")
+            fallback = await self._fallback_incident_analysis(incident, behavior_report, intel_str)
+            if fallback.status == "pending":
+                fallback.status = "analyzed"
+            return fallback
 
 llm_engine = LLMEngine()

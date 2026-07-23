@@ -9,7 +9,7 @@ services:
     environment:
       - FLASK_APP=run.py
       - FLASK_ENV=production
-      - LOCAL_DB_URL=postgresql://admin:REDACTED@db:5432/security_platform
+      - LOCAL_DB_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:-security_platform}
       # Supabase URL/Key vars if needed for hybrid mode
     volumes:
       - ./certs:/app/certs
@@ -37,9 +37,9 @@ services:
     container_name: security_platform_db
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: REDACTED
-      POSTGRES_DB: security_platform
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-security_platform}
     ports:
       - "5432:5432"
     volumes:

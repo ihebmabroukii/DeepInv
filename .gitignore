@@ -179,3 +179,52 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# ============================================================
+# Project-specific: secrets, keys, generated artifacts
+# ============================================================
+
+# --- Secrets & private key material (NEVER commit) ---
+certs/
+**/certs/
+*.key
+*.pem
+soc-tier1/vpn/config/
+**/privatekey-*
+**/presharedkey-*
+
+# --- Node ---
+node_modules/
+
+# --- Generated logs & runtime dumps ---
+logs/
+*.log
+*_logs.txt
+logs.txt
+ai_logs.txt
+debug_logs.txt
+simulation_output.txt
+test_out.log
+test_output.json
+health_report.txt
+containers.txt
+docker_status.json
+latest_incident*.json
+api_incidents.json
+redis_incident.json
+latest_narrative*.txt
+narrative.txt
+offline.txt
+rca_out.txt
+history.txt
+final.json
+rendered_dashboard.html
+*.bak
+
+# --- Thesis / report artifacts (not part of the platform) ---
+latex_figures/
+chapter5_figures/
+
+# Local user DB and vendored third-party clones
+soc-ai/data/users.db
+*.db
+soc-tier2/analyzers/

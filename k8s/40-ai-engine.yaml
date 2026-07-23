@@ -1,0 +1,145 @@
+# =============================================================================
+# AI engine tier: GPU-backed Ollama (Mistral), FastAPI SOC-AI service,
+# Celery worker, Redis broker.
+# Mirrors ./soc-ai/docker-compose.yml
+#
+# GPU NOTE: the Ollama pod requests nvidia.com/gpu. This requires the
+# NVIDIA device plugin to be installed on the cluster:
+#   kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.15.0/deployments/static/nvidia-device-plugin.yml
+# and the NVIDIA container runtime configured on the node (RTX 4070 SUPER host).
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ollama, namespace: soc, labels: { app: ollama, tier: ai } }
+spec:
+  selector: { app: ollama }
+  ports: [ { port: 11434, targetPort: 11434 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ollama, namespace: soc, labels: { app: ollama, tier: ai } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ollama } }
+  template:
+    metadata: { labels: { app: ollama, tier: ai } }
+    spec:
+      # runtimeClassName: nvidia   # uncomment if your cluster uses the nvidia RuntimeClass
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports: [ { containerPort: 11434 } ]
+          env:
+            - { name: NVIDIA_VISIBLE_DEVICES, value: all }
+            - { name: NVIDIA_DRIVER_CAPABILITIES, value: "compute,utility" }
+          resources:
+            limits:
+              nvidia.com/gpu: "1"      # air-gapped local inference on the GPU
+          volumeMounts:
+            - { name: ollama-models, mountPath: /root/.ollama }
+      volumes:
+        - name: ollama-models
+          persistentVolumeClaim: { claimName: ollama-models }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: ollama-models, namespace: soc }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 20Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: soc-ai-redis, namespace: soc, labels: { app: soc-ai-redis, tier: ai } }
+spec:
+  selector: { app: soc-ai-redis }
+  ports: [ { port: 6379, targetPort: 6379 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: soc-ai-redis, namespace: soc, labels: { app: soc-ai-redis, tier: ai } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: soc-ai-redis } }
+  template:
+    metadata: { labels: { app: soc-ai-redis, tier: ai } }
+    spec:
+      containers:
+        - name: redis
+          image: redis/redis-stack-server:latest
+          args: ["redis-stack-server", "--appendonly", "yes"]
+          ports: [ { containerPort: 6379 } ]
+          volumeMounts: [ { name: data, mountPath: /data } ]
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: soc-ai-redis-data }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: soc-ai-redis-data, namespace: soc }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: soc-ai, namespace: soc, labels: { app: soc-ai, tier: ai } }
+spec:
+  selector: { app: soc-ai }
+  ports: [ { port: 8000, targetPort: 8000 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: soc-ai, namespace: soc, labels: { app: soc-ai, tier: ai } }
+spec:
+  replicas: 2                       # stateless API — scale horizontally
+  selector: { matchLabels: { app: soc-ai } }
+  template:
+    metadata: { labels: { app: soc-ai, tier: ai } }
+    spec:
+      containers:
+        - name: soc-ai
+          # Build & push from ./soc-ai, then set this image
+          image: ghcr.io/ihebmabroukii/soc-ai:latest
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [ { containerPort: 8000 } ]
+          envFrom:
+            - configMapRef: { name: soc-config }
+          env:
+            - { name: WAZUH_API_USER, valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_USER } } }
+            - { name: WAZUH_API_PASSWORD, valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_PASSWORD } } }
+            - { name: OPENCTI_TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+            - { name: CORTEX_API_KEY, valueFrom: { secretKeyRef: { name: soc-secrets, key: CORTEX_API_KEY } } }
+            - { name: SO_ELASTIC_USER, valueFrom: { secretKeyRef: { name: soc-secrets, key: SO_ELASTIC_USER } } }
+            - { name: SO_ELASTIC_PASS, valueFrom: { secretKeyRef: { name: soc-secrets, key: SO_ELASTIC_PASS } } }
+          readinessProbe:
+            httpGet: { path: /docs, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: soc-ai-celery, namespace: soc, labels: { app: soc-ai-celery, tier: ai } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: soc-ai-celery } }
+  template:
+    metadata: { labels: { app: soc-ai-celery, tier: ai } }
+    spec:
+      containers:
+        - name: celery-worker
+          image: ghcr.io/ihebmabroukii/soc-ai:latest
+          command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info"]
+          envFrom:
+            - configMapRef: { name: soc-config }
+          env:
+            - { name: WAZUH_API_USER, valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_USER } } }
+            - { name: WAZUH_API_PASSWORD, valueFrom: { secretKeyRef: { name: soc-secrets, key: WAZUH_API_PASSWORD } } }
+            - { name: OPENCTI_TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }

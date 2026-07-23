@@ -9,9 +9,9 @@ endpoints = {
     'Frontend': 'http://localhost:3000',
     'Wazuh API': 'https://localhost:55000/security/user/authenticate',
     'TheHive': 'http://localhost:9000',
-    'OpenCTI': 'http://localhost:8080',
+    'OpenCTI': 'http://localhost:8888',
     'Cortex': 'http://localhost:9001',
-    'SOC AI API': 'http://localhost:8000/docs'
+    'SOC AI API': 'http://localhost:8001/docs'
 }
 
 ctx = ssl.create_default_context()

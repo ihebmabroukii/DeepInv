@@ -19,7 +19,7 @@ async def main():
     
     try:
         print("Sending request to LLM...")
-        result = await asyncio.wait_for(llm_engine.analyze_incident(incident), timeout=60)
+        result = await asyncio.wait_for(llm_engine.analyze_incident(incident), timeout=300)
         print(f"✅ Success! Narrative: {result.narrative}")
         
         # Check Redis directly
@@ -32,7 +32,9 @@ async def main():
              print(f"Latest in Redis: {history[0][:100]}...")
              
     except Exception as e:
+        import traceback
         print(f"❌ Failed: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())

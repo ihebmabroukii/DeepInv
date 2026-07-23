@@ -7,7 +7,7 @@
             "http://opencti:8080"
         ],
         "key": [
-            "REDACTED"
+            "REPLACE_WITH_OPENCTI_TOKEN"
         ],
         "max_tlp": 2,
         "max_pap": 2,

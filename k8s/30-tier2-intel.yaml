@@ -1,0 +1,360 @@
+# =============================================================================
+# Tier 2 - Threat intel & case management: TheHive (+Cassandra, ES), Cortex (+ES),
+# OpenCTI (+ES, Redis, MinIO, RabbitMQ, worker, connectors).
+# Mirrors ./soc-tier2/docker-compose.yml
+# =============================================================================
+---
+# ---------- Cortex + its Elasticsearch ----------
+apiVersion: v1
+kind: Service
+metadata: { name: cortex-elasticsearch, namespace: soc, labels: { app: cortex-elasticsearch, tier: intel } }
+spec:
+  selector: { app: cortex-elasticsearch }
+  ports: [ { port: 9200, targetPort: 9200 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: cortex-elasticsearch, namespace: soc, labels: { app: cortex-elasticsearch, tier: intel } }
+spec:
+  serviceName: cortex-elasticsearch
+  replicas: 1
+  selector: { matchLabels: { app: cortex-elasticsearch } }
+  template:
+    metadata: { labels: { app: cortex-elasticsearch, tier: intel } }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: elasticsearch:7.17.15
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: xpack.security.enabled, value: "false" }
+            - { name: ES_JAVA_OPTS, value: "-Xms512m -Xmx512m" }
+          ports: [ { containerPort: 9200 } ]
+          volumeMounts: [ { name: data, mountPath: /usr/share/elasticsearch/data } ]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: cortex, namespace: soc, labels: { app: cortex, tier: intel } }
+spec:
+  selector: { app: cortex }
+  ports: [ { port: 9001, targetPort: 9001 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: cortex, namespace: soc, labels: { app: cortex, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: cortex } }
+  template:
+    metadata: { labels: { app: cortex, tier: intel } }
+    spec:
+      containers:
+        - name: cortex
+          image: thehiveproject/cortex:3.2.1-1
+          ports: [ { containerPort: 9001 } ]
+          readinessProbe:
+            httpGet: { path: /api/status, port: 9001 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+# ---------- TheHive + Cassandra + its Elasticsearch ----------
+apiVersion: v1
+kind: Service
+metadata: { name: cassandra, namespace: soc, labels: { app: cassandra, tier: intel } }
+spec:
+  selector: { app: cassandra }
+  ports: [ { port: 9042, targetPort: 9042 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: cassandra, namespace: soc, labels: { app: cassandra, tier: intel } }
+spec:
+  serviceName: cassandra
+  replicas: 1
+  selector: { matchLabels: { app: cassandra } }
+  template:
+    metadata: { labels: { app: cassandra, tier: intel } }
+    spec:
+      containers:
+        - name: cassandra
+          image: cassandra:4.1
+          env:
+            - { name: CASSANDRA_CLUSTER_NAME, value: thp }
+            - { name: MAX_HEAP_SIZE, value: 1G }
+            - { name: HEAP_NEWSIZE, value: 256M }
+          ports: [ { containerPort: 9042 } ]
+          volumeMounts: [ { name: data, mountPath: /var/lib/cassandra } ]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: thehive-elasticsearch, namespace: soc, labels: { app: thehive-elasticsearch, tier: intel } }
+spec:
+  selector: { app: thehive-elasticsearch }
+  ports: [ { port: 9200, targetPort: 9200 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: thehive-elasticsearch, namespace: soc, labels: { app: thehive-elasticsearch, tier: intel } }
+spec:
+  serviceName: thehive-elasticsearch
+  replicas: 1
+  selector: { matchLabels: { app: thehive-elasticsearch } }
+  template:
+    metadata: { labels: { app: thehive-elasticsearch, tier: intel } }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: elasticsearch:7.17.15
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: xpack.security.enabled, value: "false" }
+            - { name: ES_JAVA_OPTS, value: "-Xms512m -Xmx512m" }
+          ports: [ { containerPort: 9200 } ]
+          volumeMounts: [ { name: data, mountPath: /usr/share/elasticsearch/data } ]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: thehive, namespace: soc, labels: { app: thehive, tier: intel } }
+spec:
+  selector: { app: thehive }
+  ports: [ { port: 9000, targetPort: 9000 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: thehive, namespace: soc, labels: { app: thehive, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: thehive } }
+  template:
+    metadata: { labels: { app: thehive, tier: intel } }
+    spec:
+      containers:
+        - name: thehive
+          image: strangebee/thehive:5.5
+          args: ["--no-config-secret"]
+          env:
+            - { name: JVM_OPTS, value: "-Xms1g -Xmx1g" }
+          ports: [ { containerPort: 9000 } ]
+          readinessProbe:
+            httpGet: { path: /api/status, port: 9000 }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+---
+# ---------- OpenCTI core dependencies ----------
+apiVersion: v1
+kind: Service
+metadata: { name: opencti-elasticsearch, namespace: soc, labels: { app: opencti-elasticsearch, tier: intel } }
+spec:
+  selector: { app: opencti-elasticsearch }
+  ports: [ { port: 9200, targetPort: 9200 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: opencti-elasticsearch, namespace: soc, labels: { app: opencti-elasticsearch, tier: intel } }
+spec:
+  serviceName: opencti-elasticsearch
+  replicas: 1
+  selector: { matchLabels: { app: opencti-elasticsearch } }
+  template:
+    metadata: { labels: { app: opencti-elasticsearch, tier: intel } }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: elasticsearch:8.12.0
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: xpack.security.enabled, value: "false" }
+            - { name: ES_JAVA_OPTS, value: "-Xms2g -Xmx2g" }
+          ports: [ { containerPort: 9200 } ]
+          volumeMounts: [ { name: data, mountPath: /usr/share/elasticsearch/data } ]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 20Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: opencti-redis, namespace: soc, labels: { app: opencti-redis, tier: intel } }
+spec:
+  selector: { app: opencti-redis }
+  ports: [ { port: 6379, targetPort: 6379 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti-redis, namespace: soc, labels: { app: opencti-redis, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti-redis } }
+  template:
+    metadata: { labels: { app: opencti-redis, tier: intel } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2
+          ports: [ { containerPort: 6379 } ]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: opencti-minio, namespace: soc, labels: { app: opencti-minio, tier: intel } }
+spec:
+  selector: { app: opencti-minio }
+  ports: [ { name: api, port: 9000, targetPort: 9000 }, { name: console, port: 9090, targetPort: 9090 } ]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: opencti-minio, namespace: soc, labels: { app: opencti-minio, tier: intel } }
+spec:
+  serviceName: opencti-minio
+  replicas: 1
+  selector: { matchLabels: { app: opencti-minio } }
+  template:
+    metadata: { labels: { app: opencti-minio, tier: intel } }
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2023-09-30T07-02-29Z
+          args: ["server", "/data", "--console-address", ":9090"]
+          env:
+            - { name: MINIO_ROOT_USER, valueFrom: { secretKeyRef: { name: soc-secrets, key: MINIO_ROOT_USER } } }
+            - { name: MINIO_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: soc-secrets, key: MINIO_ROOT_PASSWORD } } }
+          ports: [ { containerPort: 9000 }, { containerPort: 9090 } ]
+          volumeMounts: [ { name: data, mountPath: /data } ]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: opencti-rabbitmq, namespace: soc, labels: { app: opencti-rabbitmq, tier: intel } }
+spec:
+  selector: { app: opencti-rabbitmq }
+  ports: [ { name: amqp, port: 5672, targetPort: 5672 }, { name: mgmt, port: 15672, targetPort: 15672 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti-rabbitmq, namespace: soc, labels: { app: opencti-rabbitmq, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti-rabbitmq } }
+  template:
+    metadata: { labels: { app: opencti-rabbitmq, tier: intel } }
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.12-management
+          env:
+            - { name: RABBITMQ_DEFAULT_USER, valueFrom: { secretKeyRef: { name: soc-secrets, key: RABBITMQ_DEFAULT_USER } } }
+            - { name: RABBITMQ_DEFAULT_PASS, valueFrom: { secretKeyRef: { name: soc-secrets, key: RABBITMQ_DEFAULT_PASS } } }
+          ports: [ { containerPort: 5672 }, { containerPort: 15672 } ]
+---
+# ---------- OpenCTI platform + worker ----------
+apiVersion: v1
+kind: Service
+metadata: { name: opencti, namespace: soc, labels: { app: opencti, tier: intel } }
+spec:
+  selector: { app: opencti }
+  ports: [ { port: 8080, targetPort: 8080 } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti, namespace: soc, labels: { app: opencti, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti } }
+  template:
+    metadata: { labels: { app: opencti, tier: intel } }
+    spec:
+      containers:
+        - name: opencti
+          image: opencti/platform:6.4.4
+          ports: [ { containerPort: 8080 } ]
+          env:
+            - { name: NODE_OPTIONS, value: "--max-old-space-size=4096" }
+            - { name: APP__HOST, value: "0.0.0.0" }
+            - { name: APP__PORT, value: "8080" }
+            - { name: APP__ADMIN__EMAIL, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_ADMIN_EMAIL } } }
+            - { name: APP__ADMIN__PASSWORD, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_ADMIN_PASSWORD } } }
+            - { name: APP__ADMIN__TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+            - { name: REDIS__HOSTNAME, value: opencti-redis }
+            - { name: REDIS__PORT, value: "6379" }
+            - { name: ELASTICSEARCH__URL, value: "http://opencti-elasticsearch:9200" }
+            - { name: MINIO__ENDPOINT, value: opencti-minio }
+            - { name: MINIO__PORT, value: "9000" }
+            - { name: MINIO__USE_SSL, value: "false" }
+            - { name: MINIO__ACCESS_KEY, valueFrom: { secretKeyRef: { name: soc-secrets, key: MINIO_ROOT_USER } } }
+            - { name: MINIO__SECRET_KEY, valueFrom: { secretKeyRef: { name: soc-secrets, key: MINIO_ROOT_PASSWORD } } }
+            - { name: RABBITMQ__HOSTNAME, value: opencti-rabbitmq }
+            - { name: RABBITMQ__PORT, value: "5672" }
+            - { name: RABBITMQ__USERNAME, valueFrom: { secretKeyRef: { name: soc-secrets, key: RABBITMQ_DEFAULT_USER } } }
+            - { name: RABBITMQ__PASSWORD, valueFrom: { secretKeyRef: { name: soc-secrets, key: RABBITMQ_DEFAULT_PASS } } }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 90
+            periodSeconds: 20
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti-worker, namespace: soc, labels: { app: opencti-worker, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti-worker } }
+  template:
+    metadata: { labels: { app: opencti-worker, tier: intel } }
+    spec:
+      containers:
+        - name: worker
+          image: opencti/worker:6.4.4
+          env:
+            - { name: OPENCTI_URL, value: "http://opencti:8080" }
+            - { name: OPENCTI_TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+            - { name: WORKER_LOG_LEVEL, value: error }
+---
+# ---------- OpenCTI connectors (MITRE ATT&CK import, TheHive, history, exports) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti-connector-mitre, namespace: soc, labels: { app: opencti-connector-mitre, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti-connector-mitre } }
+  template:
+    metadata: { labels: { app: opencti-connector-mitre, tier: intel } }
+    spec:
+      containers:
+        - name: connector
+          image: opencti/connector-mitre:6.4.4
+          env:
+            - { name: OPENCTI_URL, value: "http://opencti:8080" }
+            - { name: OPENCTI_TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+            - { name: CONNECTOR_TYPE, value: EXTERNAL_IMPORT }
+            - { name: CONNECTOR_NAME, value: "MITRE ATT&CK" }
+            - { name: CONNECTOR_SCOPE, value: "identity,attack-pattern,course-of-action,intrusion-set,malware,tool,report" }
+            - { name: CONNECTOR_CONFIDENCE_LEVEL, value: "75" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opencti-connector-thehive, namespace: soc, labels: { app: opencti-connector-thehive, tier: intel } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opencti-connector-thehive } }
+  template:
+    metadata: { labels: { app: opencti-connector-thehive, tier: intel } }
+    spec:
+      containers:
+        - name: connector
+          image: opencti/connector-thehive:6.4.4
+          env:
+            - { name: OPENCTI_URL, value: "http://opencti:8080" }
+            - { name: OPENCTI_TOKEN, valueFrom: { secretKeyRef: { name: soc-secrets, key: OPENCTI_TOKEN } } }
+            - { name: CONNECTOR_TYPE, value: EXTERNAL_IMPORT }
+            - { name: CONNECTOR_NAME, value: TheHive }
+            - { name: CONNECTOR_SCOPE, value: thehive }
+            - { name: THEHIVE_URL, value: "http://thehive:9000" }
+            - { name: THEHIVE_API_KEY, valueFrom: { secretKeyRef: { name: soc-secrets, key: THEHIVE_API_KEY } } }

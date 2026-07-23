@@ -46,6 +46,11 @@ services:
   cortex:
     image: thehiveproject/cortex:3.2.1-1
     container_name: cortex
+    # Cortex runs as the non-root 'cortex' user, but the shared job dir mounts as
+    # root:755 — so analyzer jobs fail with AccessDeniedException on /tmp/cortex-jobs
+    # after any restart. Make it writable on every boot, then hand off to the real
+    # entrypoint (runs as root before it drops to the cortex user).
+    entrypoint: ["/bin/bash", "-c", "mkdir -p /tmp/cortex-jobs && chmod 777 /tmp/cortex-jobs && exec /opt/cortex/entrypoint"]
     depends_on:
       - cortex-elasticsearch
     ports:

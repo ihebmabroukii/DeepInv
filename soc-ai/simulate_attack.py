@@ -3,7 +3,7 @@ import json
 import time
 import random
 
-API_URL = "http://localhost:8000/api/v1/alerts/manual"
+API_URL = "http://127.0.0.1:8001/api/v1/alerts/manual"
 
 # Simulation: Brute Force Attack followed by Exploit
 SOURCE_IP = "192.168.1.105"

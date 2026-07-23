@@ -459,7 +459,11 @@
             };
 
             socket.onmessage = function (event) {
-                const incident = JSON.parse(event.data);
+                const payload = JSON.parse(event.data);
+                if (payload.type === "raw_alert") {
+                    return; // Ignore raw alerts in legacy incident dashboard
+                }
+                const incident = payload.type === "incident" ? payload.data : payload;
                 console.log("New Incident:", incident);
 
                 // Add/Update Map
