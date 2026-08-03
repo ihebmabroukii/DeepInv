@@ -107,7 +107,7 @@ The repo ships with reproducible attack scenarios used to exercise the full pipe
 ## Author
 
 **Iheb Mabrouki** — Cybersecurity Engineer
-[LinkedIn](https://www.linkedin.com/in/iheb-mabrouki) · [GitHub](https://github.com/ihebmabroukii) · ihebmabrouki2702@gmail.com
+[LinkedIn](https://www.linkedin.com/in/iheb-mabrouki-cs) · [GitHub](https://github.com/ihebmabroukii) · ihebmabrouki2702@gmail.com
 
 ## License
 
